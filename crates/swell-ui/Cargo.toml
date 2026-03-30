@@ -1,0 +1,33 @@
+[package]
+name = "swell-ui"
+version = "0.1.0"
+authors = ["Benjamin Klum <benjamin.klum@helgoboss.org>"]
+edition = "2021"
+publish = false
+
+[dependencies]
+reaper-medium.workspace = true
+reaper-low.workspace = true
+reaper-common-types.workspace = true
+rxrust.workspace = true
+scopeguard.workspace = true
+raw-window-handle.workspace = true
+tracing.workspace = true
+fragile.workspace = true
+palette.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+winapi.workspace = true
+libloading.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Use exact version for vizia compatibility
+objc2 = { workspace = true }
+objc2-foundation.workspace = true
+
+# Disabled until we get egui to work nicely (search for "wonky"). It's also important to use cross v0.3.0 then
+# (once it's released) because cross v2.5 uses Ubuntu < v20, which has an old glib that's not compatible with the
+# glib crate (gdk-sys dependency).
+# [target.'cfg(target_os = "linux")'.dependencies]
+# gdk-sys = "0.17.0"
+# gdkx11-sys = "0.17.0"

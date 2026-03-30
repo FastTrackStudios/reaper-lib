@@ -1,0 +1,47 @@
+[workspace]
+members = [
+    "crates/reaper-embed",
+    "crates/swell-ui",
+]
+resolver = "2"
+
+[workspace.package]
+edition = "2024"
+rust-version = "1.82"
+version = "0.1.0"
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/FastTrackStudios/reaper-lib"
+authors = ["FastTrack Studio"]
+
+[workspace.dependencies]
+# REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
+reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
+
+# Common
+tracing = { version = "0.1", features = ["std"] }
+thiserror = "2.0"
+
+# swell-ui dependencies
+rxrust = { git = "https://github.com/rxRust/rxRust", rev = "349e50b3197e05926e2378ef8fc45cb67ad43b83" }
+scopeguard = "1.1.0"
+raw-window-handle = "0.4.2"
+fragile = "2.0.1"
+palette = "0.7.3"
+
+# macOS dependencies for swell-ui
+objc2 = "=0.3.0-beta.3"
+objc2-foundation = "0.2.0"
+
+# Windows dependencies
+winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
+libloading = "0.9"
+
+# reaper-embed dependencies
+wgpu = { version = "27", features = ["wgsl"] }
+vello = { version = "0.7", features = ["wgpu"] }
+skrifa = "0.40"
+pollster = "0.4"
+cocoa = "0.26"
+objc = "0.2.7"

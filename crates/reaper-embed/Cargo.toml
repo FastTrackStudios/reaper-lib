@@ -1,0 +1,21 @@
+[package]
+name = "reaper-embed"
+version = "0.1.0"
+edition = "2024"
+description = "Transparent overlay windows with Vello rendering for REAPER extensions"
+
+[dependencies]
+wgpu.workspace = true
+vello.workspace = true
+skrifa.workspace = true
+pollster.workspace = true
+raw-window-handle = "0.6"
+tracing.workspace = true
+thiserror.workspace = true
+
+[target.'cfg(target_os = "macos")'.dependencies]
+cocoa.workspace = true
+objc.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
