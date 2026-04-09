@@ -148,7 +148,9 @@ impl HasWindowHandle for SwellHwndWrapper {
 /// This matches the pattern used by ReaImGui (gdk_window.cpp).
 #[cfg(target_os = "linux")]
 fn extract_x11_xid(hwnd: raw::HWND, swell: &Swell) -> u64 {
+    tracing::info!("extract_x11_xid: hwnd={:?}", hwnd);
     if hwnd.is_null() {
+        tracing::error!("extract_x11_xid: HWND is null!");
         return 0;
     }
 
@@ -156,7 +158,10 @@ fn extract_x11_xid(hwnd: raw::HWND, swell: &Swell) -> u64 {
     let gdk_type = std::ffi::CString::new("GdkWindow").unwrap();
     let gdk_window = unsafe { swell.SWELL_GetOSWindow(hwnd, gdk_type.as_ptr()) };
     if gdk_window.is_null() {
-        tracing::warn!("SWELL_GetOSWindow returned null — window may not be realized yet");
+        tracing::error!(
+            "SWELL_GetOSWindow returned null for HWND {:?} — window not realized or headless",
+            hwnd
+        );
         return 0;
     }
 
@@ -357,6 +362,10 @@ pub fn update_panels() {
         let mut panels = panels.borrow_mut();
         for panel in panels.values_mut() {
             if panel.visible {
+                // Try to initialize EmbeddedView if not yet created
+                // (deferred from show_panel_inner to allow GDK window realization)
+                try_init_embedded_view(panel);
+
                 if let Some(view) = &mut panel.view {
                     // Check if the window was resized by REAPER's docker
                     let swell = swell();
@@ -460,38 +469,8 @@ fn show_panel_inner(panel: &mut LivePanel) {
     let swell = swell();
     let reaper = reaper();
 
-    // Initialize the EmbeddedView on first show
-    if panel.view.is_none() {
-        let mut rect = raw::RECT {
-            left: 0,
-            top: 0,
-            right: 0,
-            bottom: 0,
-        };
-        unsafe {
-            swell.GetClientRect(panel.hwnd, &mut rect);
-        }
-        let w = (rect.right - rect.left).unsigned_abs().max(panel.config.default_width);
-        let h = (rect.bottom - rect.top).unsigned_abs().max(panel.config.default_height);
-
-        let wrapper = SwellHwndWrapper::new(panel.hwnd, swell);
-        let contexts = std::mem::take(&mut panel.contexts);
-
-        match EmbeddedView::new(panel.config.app, &wrapper, w, h, contexts) {
-            Ok(view) => {
-                panel.view = Some(view);
-                tracing::debug!("Created EmbeddedView for panel '{}'", panel.config.id);
-            }
-            Err(e) => {
-                tracing::error!(
-                    "Failed to create EmbeddedView for '{}': {}",
-                    panel.config.id,
-                    e
-                );
-            }
-        }
-    }
-
+    // Show the window FIRST — SWELL/GDK needs to realize the window
+    // before we can extract the X11 XID for GPU surface creation.
     unsafe {
         swell.ShowWindow(panel.hwnd, raw::SW_SHOW as c_int);
         reaper.DockWindowActivate(panel.hwnd);
@@ -502,6 +481,55 @@ fn show_panel_inner(panel: &mut LivePanel) {
     force_view_layout(panel.hwnd);
 
     panel.visible = true;
+    // Note: EmbeddedView creation is deferred to update_panels() —
+    // the GDK window needs a tick to realize after ShowWindow.
+}
+
+/// Try to initialize the EmbeddedView for a panel if not yet created.
+/// Called from update_panels() after the window has been shown and realized.
+fn try_init_embedded_view(panel: &mut LivePanel) {
+    if panel.view.is_some() || !panel.visible {
+        return;
+    }
+
+    let swell = swell();
+    let mut rect = raw::RECT {
+        left: 0,
+        top: 0,
+        right: 0,
+        bottom: 0,
+    };
+    unsafe {
+        swell.GetClientRect(panel.hwnd, &mut rect);
+    }
+    let w = (rect.right - rect.left).unsigned_abs().max(panel.config.default_width);
+    let h = (rect.bottom - rect.top).unsigned_abs().max(panel.config.default_height);
+
+    let wrapper = SwellHwndWrapper::new(panel.hwnd, swell);
+
+    // Check if the window handle is valid before consuming contexts
+    if wrapper.window_handle().is_err() {
+        tracing::debug!(
+            "Window handle not ready for '{}' (will retry next tick)",
+            panel.config.id
+        );
+        return;
+    }
+
+    let contexts = std::mem::take(&mut panel.contexts);
+    match EmbeddedView::new(panel.config.app, &wrapper, w, h, contexts) {
+        Ok(view) => {
+            panel.view = Some(view);
+            tracing::info!("Created EmbeddedView for panel '{}'", panel.config.id);
+        }
+        Err(e) => {
+            tracing::debug!(
+                "EmbeddedView not ready for '{}': {} (will retry)",
+                panel.config.id,
+                e
+            );
+        }
+    }
 }
 
 fn hide_panel_inner(panel: &mut LivePanel) {
