@@ -71,6 +71,18 @@ thread_local! {
     static PANELS: RefCell<HashMap<PanelId, LivePanel>> = RefCell::new(HashMap::new());
 }
 
+/// Cached references to REAPER/SWELL APIs, set on first `register_panel` call.
+static REAPER_API: std::sync::OnceLock<&'static Reaper> = std::sync::OnceLock::new();
+static SWELL_API: std::sync::OnceLock<&'static Swell> = std::sync::OnceLock::new();
+
+fn reaper() -> &'static Reaper {
+    REAPER_API.get().expect("register_panel must be called before using dock APIs")
+}
+
+fn swell() -> &'static Swell {
+    SWELL_API.get().expect("register_panel must be called before using dock APIs")
+}
+
 // ---------------------------------------------------------------------------
 // HWND wrapper for raw-window-handle traits
 // ---------------------------------------------------------------------------
@@ -156,12 +168,20 @@ impl HasDisplayHandle for SwellHwndWrapper {
 ///
 /// The `contexts` vector allows injecting Dioxus context values that will be
 /// available to the component tree (e.g., shared state signals).
-pub fn register_panel(config: DockablePanelConfig, contexts: Vec<Box<dyn FnOnce()>>) {
+pub fn register_panel(
+    config: DockablePanelConfig,
+    contexts: Vec<Box<dyn FnOnce()>>,
+    reaper: &'static Reaper,
+    swell: &'static Swell,
+) {
     let id = config.id;
-    let reaper = Reaper::get();
+
+    // Cache the API references for use by other dock functions
+    let _ = REAPER_API.set(reaper);
+    let _ = SWELL_API.set(swell);
 
     // Create a SWELL dialog window for the panel
-    let hwnd = create_panel_window(&config);
+    let hwnd = create_panel_window(&config, swell);
     if hwnd.is_null() {
         tracing::error!("Failed to create dock panel window for '{}'", config.title);
         return;
@@ -271,7 +291,7 @@ pub fn update_panels() {
             if panel.visible {
                 if let Some(view) = &mut panel.view {
                     // Check if the window was resized by REAPER's docker
-                    let swell = Swell::get();
+                    let swell = swell();
                     let mut rect = raw::RECT {
                         left: 0,
                         top: 0,
@@ -299,13 +319,13 @@ pub fn update_panels() {
 pub fn unregister_all_panels() {
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
-        let reaper = Reaper::get();
+        let reaper = reaper();
         for (_, panel) in panels.drain() {
             if !panel.hwnd.is_null() {
                 unsafe {
                     reaper.DockWindowRemove(panel.hwnd);
                 }
-                let swell = Swell::get();
+                let swell = swell();
                 unsafe {
                     swell.DestroyWindow(panel.hwnd);
                 }
@@ -318,7 +338,7 @@ pub fn unregister_all_panels() {
 pub fn save_dock_state() {
     PANELS.with(|panels| {
         let panels = panels.borrow();
-        let reaper = Reaper::get();
+        let reaper = reaper();
 
         for (id, panel) in panels.iter() {
             let section = CString::new(*id).unwrap();
@@ -346,7 +366,7 @@ pub fn save_dock_state() {
 pub fn restore_dock_state() {
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
-        let reaper = Reaper::get();
+        let reaper = reaper();
 
         for (id, panel) in panels.iter_mut() {
             let section = CString::new(*id).unwrap();
@@ -369,8 +389,8 @@ pub fn restore_dock_state() {
 // ---------------------------------------------------------------------------
 
 fn show_panel_inner(panel: &mut LivePanel) {
-    let swell = Swell::get();
-    let reaper = Reaper::get();
+    let swell = swell();
+    let reaper = reaper();
 
     // Initialize the EmbeddedView on first show
     if panel.view.is_none() {
@@ -417,7 +437,7 @@ fn show_panel_inner(panel: &mut LivePanel) {
 }
 
 fn hide_panel_inner(panel: &mut LivePanel) {
-    let swell = Swell::get();
+    let swell = swell();
     unsafe {
         swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int);
     }
@@ -432,8 +452,7 @@ fn hide_panel_inner(panel: &mut LivePanel) {
 ///
 /// On all platforms, we use SWELL's CreateDialogParam to create a window
 /// that REAPER can manage in its docker system.
-fn create_panel_window(config: &DockablePanelConfig) -> raw::HWND {
-    let swell = Swell::get();
+fn create_panel_window(config: &DockablePanelConfig, swell: &Swell) -> raw::HWND {
 
     // Create a simple child window via SWELL
     // We use CreateDialogParam with no resource (empty dialog template)
@@ -500,7 +519,7 @@ unsafe extern "C" fn panel_wndproc(
         }
         _ => {
             // Default window procedure
-            let swell = Swell::get();
+            let swell = swell();
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
     }
@@ -544,7 +563,7 @@ pub fn would_create_circular_parent(child: raw::HWND, parent: raw::HWND) -> bool
         return false;
     }
 
-    let swell = Swell::get();
+    let swell = swell();
     let mut current = parent;
 
     // Walk up the parent chain (max 64 levels to prevent infinite loops)
