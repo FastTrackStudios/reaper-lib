@@ -89,7 +89,7 @@ fn swell() -> &'static Swell {
 
 struct SwellHwndWrapper {
     hwnd: raw::HWND,
-    /// Cached X11 XID extracted from SWELL HWND via GDK (Linux only).
+    /// On Linux: X11 XID for the render surface (may be a child window we created).
     #[cfg(target_os = "linux")]
     xid: u64,
 }
@@ -106,6 +106,12 @@ impl SwellHwndWrapper {
             #[cfg(target_os = "linux")]
             xid,
         }
+    }
+
+    /// Create a wrapper with an explicit X11 window ID (for direct X11 windows).
+    #[cfg(target_os = "linux")]
+    fn with_xid(hwnd: raw::HWND, xid: u64) -> Self {
+        Self { hwnd, xid }
     }
 }
 
@@ -508,6 +514,27 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
     let wrapper = SwellHwndWrapper::new(panel.hwnd, swell);
 
     // Check if the window handle is valid before consuming contexts
+    #[cfg(target_os = "linux")]
+    let wrapper = if wrapper.window_handle().is_err() {
+        // SWELL GDK path failed — create a direct X11 child window as render target
+        match create_x11_child_for_panel(panel, w, h) {
+            Some(xid) => {
+                tracing::info!(xid, "Created X11 child window for panel '{}'", panel.config.id);
+                SwellHwndWrapper::with_xid(panel.hwnd, xid)
+            }
+            None => {
+                tracing::debug!(
+                    "X11 child window not ready for '{}' (will retry)",
+                    panel.config.id
+                );
+                return;
+            }
+        }
+    } else {
+        wrapper
+    };
+
+    #[cfg(not(target_os = "linux"))]
     if wrapper.window_handle().is_err() {
         tracing::debug!(
             "Window handle not ready for '{}' (will retry next tick)",
@@ -546,32 +573,35 @@ fn hide_panel_inner(panel: &mut LivePanel) {
 
 /// Create a SWELL dialog window for the dockable panel.
 ///
-/// On all platforms, we use SWELL's CreateDialogParam to create a window
-/// that REAPER can manage in its docker system.
+/// On Linux, SWELL uses GDK for window management. The dialog must be
+/// created with proper style flags so SWELL allocates a real GdkWindow
+/// (which we later extract via SWELL_GetOSWindow for GPU rendering).
+///
+/// Uses SWELL's magic resid `0x400000 + flags` to bypass resource lookup
+/// and create a window with WS_CAPTION + WS_THICKFRAME directly.
 fn create_panel_window(config: &DockablePanelConfig, swell: &Swell) -> raw::HWND {
-
-    // Create a simple child window via SWELL
-    // We use CreateDialogParam with no resource (empty dialog template)
     let title_c = CString::new(config.title).unwrap();
 
     unsafe {
-        // Use SWELL_CreateDialog with a null resource to create a plain window
+        // Magic resid: 0x400000 + flags
+        // bit 0 = resizable (WS_THICKFRAME)
+        // This tells SWELL_CreateDialog to create a top-level window with
+        // WS_CAPTION | WS_THICKFRAME without needing a dialog resource.
+        let magic_resid = (0x400000usize | 0x1) as *const std::os::raw::c_char; // resizable
+
         let hwnd = swell.CreateDialogParam(
-            ptr::null_mut(), // hInstance — not used on SWELL
-            ptr::null(),     // template name — null for bare window
-            ptr::null_mut(), // parent — null, REAPER will reparent via DockWindowAddEx
+            ptr::null_mut(),       // hInstance — not used on SWELL
+            magic_resid,           // magic resid → creates real window
+            ptr::null_mut(),       // parent — null, REAPER reparents via DockWindowAddEx
             Some(panel_wndproc),
-            0, // LPARAM
+            0,
         );
 
         if !hwnd.is_null() {
-            // Set window title
             swell.SetWindowText(hwnd, title_c.as_ptr());
-
-            // Set initial size
             swell.SetWindowPos(
                 hwnd,
-                ptr::null_mut(), // hWndInsertAfter
+                ptr::null_mut(),
                 0,
                 0,
                 config.default_width as c_int,
@@ -581,6 +611,82 @@ fn create_panel_window(config: &DockablePanelConfig, swell: &Swell) -> raw::HWND
         }
 
         hwnd
+    }
+}
+
+/// Create a direct X11 child window for GPU rendering inside a docked panel.
+///
+/// When SWELL's GDK path doesn't produce a GdkWindow (common for docker-managed
+/// windows), we create a raw X11 window as the render target. This window is
+/// a child of the root window and gets its position/size managed by our update loop.
+#[cfg(target_os = "linux")]
+fn create_x11_child_for_panel(_panel: &LivePanel, width: u32, height: u32) -> Option<u64> {
+    use reaper_embed::transparent::x11_display;
+
+    let (xlib, display) = x11_display()?;
+    let screen = unsafe { (xlib.XDefaultScreen)(display) };
+    let root = unsafe { (xlib.XRootWindow)(display, screen) };
+
+    let window = unsafe {
+        (xlib.XCreateSimpleWindow)(
+            display,
+            root,
+            0, 0,
+            width, height,
+            0,  // border width
+            0,  // border color
+            0x121212, // dark background
+        )
+    };
+
+    if window == 0 {
+        return None;
+    }
+
+    // Map the window (make it visible)
+    unsafe {
+        (xlib.XMapWindow)(display, window);
+        (xlib.XFlush)(display);
+    }
+
+    Some(window)
+}
+
+/// Alternative window creation using platform-native APIs.
+/// Used as a fallback if SWELL magic resid doesn't produce a real window.
+#[cfg(target_os = "linux")]
+#[allow(dead_code)]
+fn create_panel_window_x11(config: &DockablePanelConfig) -> raw::HWND {
+    // On Linux, if SWELL's dialog creation doesn't produce a GdkWindow,
+    // we can create an X11 window directly and use it as the render target.
+    // This bypasses SWELL entirely for the panel content window.
+    use reaper_embed::transparent::x11_display;
+
+    let Some((xlib, display)) = x11_display() else {
+        tracing::error!("No X11 display — cannot create panel window");
+        return ptr::null_mut();
+    };
+
+    unsafe {
+        let screen = (xlib.XDefaultScreen)(display);
+        let root = (xlib.XRootWindow)(display, screen);
+
+        let window = (xlib.XCreateSimpleWindow)(
+            display,
+            root,
+            0, 0,
+            config.default_width, config.default_height,
+            0,  // border
+            0,  // border color
+            0,  // background
+        );
+
+        if window == 0 {
+            return ptr::null_mut();
+        }
+
+        (xlib.XFlush)(display);
+        window as raw::HWND
     }
 }
 
