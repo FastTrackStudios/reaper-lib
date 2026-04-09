@@ -60,14 +60,21 @@ impl HasDisplayHandle for RawHandleWrapper {
 }
 
 /// GPU state for Vello rendering to a WGPU surface.
+/// GPU state for Vello rendering to a WGPU surface.
+///
+/// Field order matters: Rust drops fields top-to-bottom. Surface and textures
+/// must be dropped before Device to avoid wgpu validation errors.
 pub struct GpuState {
-    pub device: Device,
-    pub queue: Queue,
-    pub surface: Surface<'static>,
-    pub surface_config: SurfaceConfiguration,
+    // Rendering resources (dropped first)
     pub vello_renderer: VelloRenderer,
     intermediate_texture: wgpu::Texture,
     texture_blitter: TextureBlitter,
+    pub surface_config: SurfaceConfiguration,
+    // Surface dropped before device (wgpu requirement)
+    pub surface: Surface<'static>,
+    // Core GPU handles (dropped last)
+    pub queue: Queue,
+    pub device: Device,
     #[allow(dead_code)]
     adapter: Adapter,
 }

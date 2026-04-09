@@ -29,6 +29,7 @@ tracing.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"
+x11-dl = "2.21"
 
 [lints.rust]
 unsafe_code = "allow"

@@ -401,11 +401,10 @@ fn set_native_click_through(ns_view: RawHwnd, click_through: bool) {
 
 #[cfg(target_os = "linux")]
 mod x11_state {
-    use std::sync::OnceLock;
+    use std::sync::Mutex;
     use x11_dl::xlib::{Display, Xlib};
 
     /// Process-global Xlib function table + persistent display connection.
-    /// Loaded once, never unloaded.
     struct X11Global {
         xlib: Xlib,
         display: *mut Display,
@@ -415,32 +414,46 @@ mod x11_state {
     unsafe impl Send for X11Global {}
     unsafe impl Sync for X11Global {}
 
-    static GLOBAL: OnceLock<Option<X11Global>> = OnceLock::new();
+    /// Retry-capable lazy init. Unlike OnceLock, this retries if the initial
+    /// attempt fails (e.g., DISPLAY="" during headless init, then restored
+    /// by the test wrapper script before the first panel opens).
+    static GLOBAL: Mutex<Option<X11Global>> = Mutex::new(None);
 
-    fn global() -> Option<&'static X11Global> {
-        GLOBAL.get_or_init(|| {
-            let xlib = match Xlib::open() {
-                Ok(xlib) => xlib,
-                Err(_) => {
-                    tracing::warn!("Failed to load libX11 — running headless?");
-                    return None;
-                }
-            };
-            let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
-            if display.is_null() {
-                tracing::warn!("Failed to open X11 display — running headless?");
-                return None;
+    fn try_init() -> bool {
+        let mut guard = GLOBAL.lock().unwrap();
+        if guard.is_some() {
+            return true;
+        }
+        let xlib = match Xlib::open() {
+            Ok(xlib) => xlib,
+            Err(_) => {
+                tracing::debug!("Failed to load libX11");
+                return false;
             }
-            Some(X11Global { xlib, display })
-        }).as_ref()
+        };
+        let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
+        if display.is_null() {
+            tracing::debug!("Failed to open X11 display");
+            return false;
+        }
+        *guard = Some(X11Global { xlib, display });
+        true
     }
 
     pub fn xlib() -> Option<&'static Xlib> {
-        global().map(|g| &g.xlib)
+        if !try_init() { return None; }
+        let guard = GLOBAL.lock().unwrap();
+        // SAFETY: Once initialized, the value lives for the process lifetime.
+        // We never remove it from the Mutex.
+        guard.as_ref().map(|g| unsafe {
+            &*(&g.xlib as *const Xlib)
+        })
     }
 
     pub fn display() -> Option<*mut Display> {
-        global().map(|g| g.display)
+        if !try_init() { return None; }
+        let guard = GLOBAL.lock().unwrap();
+        guard.as_ref().map(|g| g.display)
     }
 }
 

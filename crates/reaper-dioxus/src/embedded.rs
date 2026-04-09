@@ -128,15 +128,20 @@ impl EmbeddedView {
     }
 
     /// Tick: poll vdom, resolve layout, render to GPU surface.
+    ///
+    /// Only does GPU work when the DOM has changed (waker fired or document::Style
+    /// messages received). Skips painting when nothing is dirty.
     pub fn update(&mut self) {
         let animation_time = self.animation_start.elapsed().as_secs_f64();
 
-        self.doc.vdom.mark_all_dirty();
+        // Poll the virtual DOM for async events
         let cx = std::task::Context::from_waker(&self.waker);
         self.doc.poll(Some(cx));
 
         // Process document::Style messages
+        let mut has_style_changes = false;
         while let Ok(msg) = self.doc_message_rx.try_recv() {
+            has_style_changes = true;
             match msg {
                 DocumentMessage::CreateHeadElement {
                     name,
@@ -148,8 +153,17 @@ impl EmbeddedView {
             }
         }
 
+        // Only do expensive work when something changed
+        let needs_redraw = self.needs_redraw.swap(false, Ordering::Relaxed);
+        if !needs_redraw && !has_style_changes {
+            return;
+        }
+
+        // Mark dirty and resolve layout
+        self.doc.vdom.mark_all_dirty();
         self.doc.inner_mut().resolve(animation_time);
 
+        // Paint + render
         self.scene.reset();
         paint_scene(
             &mut VelloScenePainter::new(&mut self.scene),
@@ -162,8 +176,12 @@ impl EmbeddedView {
         if let Err(e) = self.gpu.render(&self.scene) {
             tracing::debug!("Embedded view render error: {e}");
         }
+    }
 
-        self.needs_redraw.store(false, Ordering::Relaxed);
+    /// Mark the view as needing a redraw on the next update.
+    /// Call this when external state changes that the component reads.
+    pub fn mark_dirty(&self) {
+        self.needs_redraw.store(true, Ordering::Relaxed);
     }
 
     /// Handle a resize event from the parent window.
@@ -174,6 +192,7 @@ impl EmbeddedView {
         if self.width != width || self.height != height {
             self.width = width;
             self.height = height;
+            self.needs_redraw.store(true, Ordering::Relaxed);
             self.gpu.resize(width, height);
             let viewport = Viewport::new(width, height, self.scale_factor, ColorScheme::Dark);
             self.doc.inner_mut().set_viewport(viewport);

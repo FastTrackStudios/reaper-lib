@@ -4827,6 +4827,7 @@ dependencies = [
  "tracing",
  "vello",
  "wgpu 26.0.1",
+ "x11-dl",
 ]
 
 [[package]]
