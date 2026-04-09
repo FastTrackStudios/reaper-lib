@@ -4820,6 +4820,7 @@ dependencies = [
  "crossbeam",
  "dioxus-native",
  "futures-util",
+ "libc",
  "raw-window-handle 0.6.2",
  "reaper-embed",
  "reaper-low",

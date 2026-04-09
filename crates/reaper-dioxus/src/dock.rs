@@ -89,10 +89,25 @@ fn swell() -> &'static Swell {
 
 struct SwellHwndWrapper {
     hwnd: raw::HWND,
+    /// Cached X11 XID extracted from SWELL HWND via GDK (Linux only).
+    #[cfg(target_os = "linux")]
+    xid: u64,
 }
 
 unsafe impl Send for SwellHwndWrapper {}
 unsafe impl Sync for SwellHwndWrapper {}
+
+impl SwellHwndWrapper {
+    fn new(hwnd: raw::HWND, swell: &Swell) -> Self {
+        #[cfg(target_os = "linux")]
+        let xid = extract_x11_xid(hwnd, swell);
+        Self {
+            hwnd,
+            #[cfg(target_os = "linux")]
+            xid,
+        }
+    }
+}
 
 impl HasWindowHandle for SwellHwndWrapper {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
@@ -109,10 +124,10 @@ impl HasWindowHandle for SwellHwndWrapper {
         #[cfg(target_os = "linux")]
         {
             use raw_window_handle::XlibWindowHandle;
-            // On Linux, SWELL HWND wraps an X11 Window ID.
-            // We need to extract the actual X11 window from the SWELL handle.
-            let xid = self.hwnd as u64;
-            let handle = XlibWindowHandle::new(xid.try_into().unwrap_or(0));
+            if self.xid == 0 {
+                return Err(HandleError::Unavailable);
+            }
+            let handle = XlibWindowHandle::new(self.xid.try_into().unwrap_or(0));
             Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::Xlib(handle)) })
         }
         #[cfg(not(any(target_os = "macos", target_os = "linux")))]
@@ -125,6 +140,58 @@ impl HasWindowHandle for SwellHwndWrapper {
             Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::Win32(handle)) })
         }
     }
+}
+
+/// Extract the X11 Window ID (XID) from a SWELL HWND on Linux.
+///
+/// Path: SWELL HWND → SWELL_GetOSWindow("GdkWindow") → gdk_x11_window_get_xid()
+/// This matches the pattern used by ReaImGui (gdk_window.cpp).
+#[cfg(target_os = "linux")]
+fn extract_x11_xid(hwnd: raw::HWND, swell: &Swell) -> u64 {
+    if hwnd.is_null() {
+        return 0;
+    }
+
+    // Step 1: Get GdkWindow* from SWELL HWND
+    let gdk_type = std::ffi::CString::new("GdkWindow").unwrap();
+    let gdk_window = unsafe { swell.SWELL_GetOSWindow(hwnd, gdk_type.as_ptr()) };
+    if gdk_window.is_null() {
+        tracing::warn!("SWELL_GetOSWindow returned null — window may not be realized yet");
+        return 0;
+    }
+
+    // Step 2: Call gdk_x11_window_get_xid(gdk_window) via dlopen
+    // This function is in libgdk-x11-2.0.so (GDK3 X11 backend)
+    type GdkX11WindowGetXid = unsafe extern "C" fn(*mut c_void) -> u64;
+
+    let lib_names = [
+        "libgdk-3.so.0",
+        "libgdk-3.so",
+        "libgdk-x11-2.0.so.0",
+        "libgdk-x11-2.0.so",
+    ];
+
+    for lib_name in &lib_names {
+        let c_lib = std::ffi::CString::new(*lib_name).unwrap();
+        let handle = unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_NOLOAD) };
+        if handle.is_null() {
+            continue;
+        }
+
+        let sym_name = std::ffi::CString::new("gdk_x11_window_get_xid").unwrap();
+        let sym = unsafe { libc::dlsym(handle, sym_name.as_ptr()) };
+        unsafe { libc::dlclose(handle) };
+
+        if !sym.is_null() {
+            let func: GdkX11WindowGetXid = unsafe { std::mem::transmute(sym) };
+            let xid = unsafe { func(gdk_window) };
+            tracing::debug!(xid, "Extracted X11 XID from SWELL HWND via GDK");
+            return xid;
+        }
+    }
+
+    tracing::warn!("Could not find gdk_x11_window_get_xid — GDK X11 backend not loaded?");
+    0
 }
 
 impl HasDisplayHandle for SwellHwndWrapper {
@@ -407,7 +474,7 @@ fn show_panel_inner(panel: &mut LivePanel) {
         let w = (rect.right - rect.left).unsigned_abs().max(panel.config.default_width);
         let h = (rect.bottom - rect.top).unsigned_abs().max(panel.config.default_height);
 
-        let wrapper = SwellHwndWrapper { hwnd: panel.hwnd };
+        let wrapper = SwellHwndWrapper::new(panel.hwnd, swell);
         let contexts = std::mem::take(&mut panel.contexts);
 
         match EmbeddedView::new(panel.config.app, &wrapper, w, h, contexts) {
