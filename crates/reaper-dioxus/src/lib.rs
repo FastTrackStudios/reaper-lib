@@ -16,6 +16,7 @@
 
 pub mod dock;
 pub mod embedded;
+pub mod hot_reload;
 pub mod overlay;
 
 pub use dock::{DockablePanelConfig, register_panel, toggle_panel, show_panel, hide_panel,

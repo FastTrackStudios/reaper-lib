@@ -21,11 +21,18 @@ anyrender_vello = "0.6"
 vello.workspace = true
 wgpu.workspace = true
 
+# Hot reload (enabled by default for dev, disable for release)
+dioxus-devtools = { version = "0.7", optional = true }
+
 # Utilities
 futures-util = "0.3"
 crossbeam = "0.8"
 raw-window-handle = "0.6"
 tracing.workspace = true
+
+[features]
+default = ["hot-reload"]
+hot-reload = ["dep:dioxus-devtools"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

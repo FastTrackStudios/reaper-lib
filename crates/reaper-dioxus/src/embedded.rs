@@ -23,12 +23,13 @@ use std::sync::Arc;
 use std::time::Instant;
 use vello::Scene;
 
+use crate::hot_reload::HotReloadState;
 use crate::overlay::{DocumentMessage, DocumentProxy};
 
 /// A Dioxus view embedded inside an existing REAPER HWND.
 ///
-/// This provides full interactive rendering (mouse, keyboard, focus)
-/// within a REAPER dockable panel or custom window.
+/// Supports hot reload via dioxus-devtools when the `hot-reload` feature
+/// is enabled. Run `dx serve` to connect.
 pub struct EmbeddedView {
     doc: DioxusDocument,
     doc_message_rx: Receiver<DocumentMessage>,
@@ -36,6 +37,7 @@ pub struct EmbeddedView {
     scene: Scene,
     waker: std::task::Waker,
     needs_redraw: Arc<AtomicBool>,
+    hot_reload: HotReloadState,
     animation_start: Instant,
     scale_factor: f32,
     width: u32,
@@ -113,6 +115,10 @@ impl EmbeddedView {
         let needs_redraw = Arc::new(AtomicBool::new(true));
         let waker = futures_util::task::waker(Arc::new(EmbeddedWaker(needs_redraw.clone())));
 
+        // Connect to dioxus-devtools for hot reload (if feature enabled)
+        let mut hot_reload = HotReloadState::new();
+        hot_reload.connect();
+
         Ok(Self {
             doc,
             doc_message_rx: doc_rx,
@@ -120,6 +126,7 @@ impl EmbeddedView {
             scene: Scene::new(),
             waker,
             needs_redraw,
+            hot_reload,
             animation_start: Instant::now(),
             scale_factor,
             width,
@@ -133,6 +140,9 @@ impl EmbeddedView {
     /// messages received). Skips painting when nothing is dirty.
     pub fn update(&mut self) {
         let animation_time = self.animation_start.elapsed().as_secs_f64();
+
+        // Process hot reload messages (RSX patches from dx serve)
+        let hot_changed = self.hot_reload.process_messages(&mut self.doc);
 
         // Poll the virtual DOM for async events
         let cx = std::task::Context::from_waker(&self.waker);
@@ -155,7 +165,7 @@ impl EmbeddedView {
 
         // Only do expensive work when something changed
         let needs_redraw = self.needs_redraw.swap(false, Ordering::Relaxed);
-        if !needs_redraw && !has_style_changes {
+        if !needs_redraw && !has_style_changes && !hot_changed {
             return;
         }
 

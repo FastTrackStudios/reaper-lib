@@ -4818,6 +4818,7 @@ dependencies = [
  "blitz-paint",
  "blitz-traits",
  "crossbeam",
+ "dioxus-devtools",
  "dioxus-native",
  "futures-util",
  "libc",
