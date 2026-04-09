@@ -1,14 +1,20 @@
-//! Dioxus-native overlay rendering for REAPER extensions.
+//! Dioxus-native rendering for REAPER extensions.
 //!
-//! Provides `DioxusOverlay` — a transparent overlay window that renders a Dioxus
-//! component tree via the blitz rendering engine (dioxus-native + Vello + wgpu).
+//! Provides two rendering modes:
 //!
-//! Unlike the plugin integration (nih_plug_dioxus), this does not use baseview.
-//! The render loop is driven by the caller (typically a REAPER timer callback).
+//! - **`DioxusOverlay`** — A transparent overlay window that floats above REAPER.
+//!   Click-through by default. Great for HUDs, which-key popups, status indicators.
+//!
+//! - **`EmbeddedView`** — A Dioxus view rendered inside an existing REAPER window.
+//!   Fully interactive (mouse, keyboard). For dockable panels, custom editors, etc.
+//!
+//! Both are driven by the caller's timer callback (no baseview, no event loop).
 
-mod overlay;
+pub mod embedded;
+pub mod overlay;
 
-pub use overlay::DioxusOverlay;
+pub use embedded::EmbeddedView;
+pub use overlay::{DioxusOverlay, DioxusOverlayBuilder, OverlayConfig};
 
 // Re-export dioxus prelude for component authors
 pub use dioxus_native::prelude;

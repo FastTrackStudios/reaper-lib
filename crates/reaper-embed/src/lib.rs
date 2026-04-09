@@ -13,6 +13,6 @@ pub mod text;
 pub mod transparent;
 
 pub use gpu::{GpuError, GpuState};
-pub use platform::{WindowRect, main_screen_height};
+pub use platform::{WindowRect, display_scale_factor, main_screen_height};
 pub use text::VelloTextRenderer;
 pub use transparent::TransparentWindow;

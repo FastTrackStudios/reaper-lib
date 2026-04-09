@@ -114,6 +114,13 @@ impl HasDisplayHandle for NativeHandleWrapper {
     }
 }
 
+/// Returns a reference to the shared Xlib function table and display pointer.
+/// Used by `platform.rs` for screen queries.
+#[cfg(target_os = "linux")]
+pub(crate) fn x11_display() -> (&'static x11_dl::xlib::Xlib, *mut x11_dl::xlib::Display) {
+    (x11_state::xlib(), x11_state::display())
+}
+
 // ---------------------------------------------------------------------------
 // TransparentWindow implementation
 // ---------------------------------------------------------------------------
@@ -182,6 +189,13 @@ impl TransparentWindow {
 
     pub fn bounds(&self) -> &WindowRect {
         &self.bounds
+    }
+
+    /// Set whether this window is click-through (input passes to windows below).
+    pub fn set_click_through(&mut self, click_through: bool) {
+        if let Some(hwnd) = self.hwnd {
+            set_native_click_through(hwnd, click_through);
+        }
     }
 
     pub fn close(&mut self) {
@@ -387,13 +401,36 @@ fn set_native_click_through(ns_view: RawHwnd, click_through: bool) {
 #[cfg(target_os = "linux")]
 mod x11_state {
     use std::sync::OnceLock;
-    use x11_dl::xlib::Xlib;
+    use x11_dl::xlib::{Display, Xlib};
 
-    /// Process-global Xlib function table. Loaded once, never unloaded.
-    static XLIB: OnceLock<Xlib> = OnceLock::new();
+    /// Process-global Xlib function table + persistent display connection.
+    /// Loaded once, never unloaded.
+    struct X11Global {
+        xlib: Xlib,
+        display: *mut Display,
+    }
+
+    // SAFETY: REAPER extensions are single-threaded on the main thread.
+    unsafe impl Send for X11Global {}
+    unsafe impl Sync for X11Global {}
+
+    static GLOBAL: OnceLock<X11Global> = OnceLock::new();
+
+    fn global() -> &'static X11Global {
+        GLOBAL.get_or_init(|| {
+            let xlib = Xlib::open().expect("Failed to load libX11");
+            let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
+            assert!(!display.is_null(), "Failed to open X11 display");
+            X11Global { xlib, display }
+        })
+    }
 
     pub fn xlib() -> &'static Xlib {
-        XLIB.get_or_init(|| Xlib::open().expect("Failed to load libX11"))
+        &global().xlib
+    }
+
+    pub fn display() -> *mut Display {
+        global().display
     }
 }
 
@@ -410,14 +447,9 @@ fn create_native_transparent_window(
     };
 
     let xlib = x11_state::xlib();
+    let display = x11_state::display();
 
     unsafe {
-        let display = (xlib.XOpenDisplay)(std::ptr::null());
-        if display.is_null() {
-            tracing::error!("Failed to open X11 display");
-            return None;
-        }
-
         let screen = (xlib.XDefaultScreen)(display);
         let root = (xlib.XRootWindow)(display, screen);
 
@@ -426,7 +458,6 @@ fn create_native_transparent_window(
         let found = (xlib.XMatchVisualInfo)(display, screen, 32, TrueColor, &mut visual_info);
         if found == 0 {
             tracing::error!("No 32-bit ARGB visual available — compositor required");
-            (xlib.XCloseDisplay)(display);
             return None;
         }
 
@@ -460,7 +491,6 @@ fn create_native_transparent_window(
         if window == 0 {
             tracing::error!("Failed to create X11 window");
             (xlib.XFreeColormap)(display, colormap);
-            (xlib.XCloseDisplay)(display);
             return None;
         }
 
@@ -534,72 +564,51 @@ fn set_x11_atoms(xlib_fns: &x11_dl::xlib::Xlib, display: *mut x11_dl::xlib::Disp
 #[cfg(target_os = "linux")]
 fn show_native_window(hwnd: RawHwnd, show: bool) {
     let xlib = x11_state::xlib();
+    let display = x11_state::display();
     let window = hwnd as u64;
 
-    // We need the display — retrieve it from the process-global connection.
-    // Since we used XOpenDisplay(null) which gives us the default display,
-    // we can re-open it (X11 ref-counts connections per process).
     unsafe {
-        let display = (xlib.XOpenDisplay)(std::ptr::null());
-        if display.is_null() {
-            return;
-        }
         if show {
             (xlib.XMapRaised)(display, window);
         } else {
             (xlib.XUnmapWindow)(display, window);
         }
         (xlib.XFlush)(display);
-        (xlib.XCloseDisplay)(display);
     }
 }
 
 #[cfg(target_os = "linux")]
 fn set_native_window_frame(hwnd: RawHwnd, x: i32, y: i32, width: u32, height: u32) {
     let xlib = x11_state::xlib();
+    let display = x11_state::display();
     let window = hwnd as u64;
 
     unsafe {
-        let display = (xlib.XOpenDisplay)(std::ptr::null());
-        if display.is_null() {
-            return;
-        }
         (xlib.XMoveResizeWindow)(display, window, x, y, width, height);
         (xlib.XFlush)(display);
-        (xlib.XCloseDisplay)(display);
     }
 }
 
 #[cfg(target_os = "linux")]
 fn close_native_window(hwnd: RawHwnd) {
     let xlib = x11_state::xlib();
+    let display = x11_state::display();
     let window = hwnd as u64;
 
     unsafe {
-        let display = (xlib.XOpenDisplay)(std::ptr::null());
-        if display.is_null() {
-            return;
-        }
         (xlib.XDestroyWindow)(display, window);
         (xlib.XFlush)(display);
-        (xlib.XCloseDisplay)(display);
     }
 }
 
 #[cfg(target_os = "linux")]
 fn set_native_click_through(hwnd: RawHwnd, click_through: bool) {
-    // Use the XShape extension to make the window input-transparent.
-    // Setting ShapeInput to an empty region means all clicks pass through.
     let xlib = x11_state::xlib();
+    let display = x11_state::display();
     let window = hwnd as u64;
 
     unsafe {
-        let display = (xlib.XOpenDisplay)(std::ptr::null());
-        if display.is_null() {
-            return;
-        }
-
-        // Try to load the XShape extension
+        // Try to load the XFixes extension
         if let Ok(xfixes) = x11_dl::xfixes::Xlib::open() {
             if click_through {
                 // Create an empty region (no input area → all clicks pass through)
@@ -629,7 +638,6 @@ fn set_native_click_through(hwnd: RawHwnd, click_through: bool) {
         }
 
         (xlib.XFlush)(display);
-        (xlib.XCloseDisplay)(display);
     }
 }
 

@@ -1,0 +1,194 @@
+//! EmbeddedView — Dioxus rendering inside an existing REAPER window.
+//!
+//! Creates a child window parented to a REAPER HWND and renders a Dioxus
+//! component tree into it. Unlike `DioxusOverlay`, this is not transparent
+//! or click-through — it's a fully interactive view embedded inside a
+//! REAPER panel, docker, or custom window.
+//!
+//! On Linux, creates an X11 child window via XReparentWindow.
+//! On macOS, creates an NSView added as a subview.
+
+use anyrender_vello::VelloScenePainter;
+use blitz_dom::Document as _;
+use blitz_paint::paint_scene;
+use blitz_traits::shell::{ColorScheme, Viewport};
+use crossbeam::channel::{Receiver, unbounded};
+use dioxus_native::prelude::*;
+use dioxus_native::{DioxusDocument, DocumentConfig};
+use futures_util::task::ArcWake;
+use reaper_embed::{GpuError, GpuState};
+use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+use vello::Scene;
+
+use crate::overlay::{DocumentMessage, DocumentProxy};
+
+/// A Dioxus view embedded inside an existing REAPER HWND.
+///
+/// This provides full interactive rendering (mouse, keyboard, focus)
+/// within a REAPER dockable panel or custom window.
+pub struct EmbeddedView {
+    doc: DioxusDocument,
+    doc_message_rx: Receiver<DocumentMessage>,
+    gpu: GpuState,
+    scene: Scene,
+    waker: std::task::Waker,
+    needs_redraw: Arc<AtomicBool>,
+    animation_start: Instant,
+    scale_factor: f32,
+    width: u32,
+    height: u32,
+}
+
+impl EmbeddedView {
+    /// Create a new embedded view rendering into the given REAPER HWND.
+    ///
+    /// The `parent_hwnd` should be a valid SWELL HWND (e.g., from a dockable
+    /// dialog or custom window).
+    ///
+    /// # Safety
+    /// The `parent_hwnd` must be a valid window handle that remains valid for
+    /// the lifetime of this `EmbeddedView`.
+    pub fn new<W>(
+        app: fn() -> Element,
+        window: &W,
+        width: u32,
+        height: u32,
+        contexts: Vec<Box<dyn FnOnce()>>,
+    ) -> Result<Self, GpuError>
+    where
+        W: raw_window_handle::HasWindowHandle + raw_window_handle::HasDisplayHandle,
+    {
+        let width = width.max(1);
+        let height = height.max(1);
+        let scale_factor = reaper_embed::display_scale_factor() as f32;
+
+        // Create GPU state from the parent window handle
+        let gpu = GpuState::new(window, width, height)?;
+
+        // Set up document::Style message channel
+        let (doc_tx, doc_rx) = unbounded();
+        let doc_proxy = Rc::new(DocumentProxy::new(doc_tx));
+
+        // Create the Dioxus document
+        let vdom = VirtualDom::new(app);
+        let viewport = Viewport::new(width, height, scale_factor, ColorScheme::Dark);
+
+        let mut doc = DioxusDocument::new(
+            vdom,
+            DocumentConfig {
+                viewport: Some(viewport),
+                ..Default::default()
+            },
+        );
+
+        // Inject contexts
+        doc.vdom.in_scope(ScopeId::ROOT, || {
+            provide_context(doc_proxy as Rc<dyn document::Document>);
+            for ctx_fn in contexts {
+                ctx_fn();
+            }
+        });
+
+        // Initial build
+        doc.initial_build();
+
+        // Process initial document::Style messages
+        while let Ok(msg) = doc_rx.try_recv() {
+            match msg {
+                DocumentMessage::CreateHeadElement {
+                    name,
+                    attributes,
+                    contents,
+                } => {
+                    doc.create_head_element(&name, &attributes, &contents);
+                }
+            }
+        }
+
+        doc.inner_mut().resolve(0.0);
+
+        let needs_redraw = Arc::new(AtomicBool::new(true));
+        let waker = futures_util::task::waker(Arc::new(EmbeddedWaker(needs_redraw.clone())));
+
+        Ok(Self {
+            doc,
+            doc_message_rx: doc_rx,
+            gpu,
+            scene: Scene::new(),
+            waker,
+            needs_redraw,
+            animation_start: Instant::now(),
+            scale_factor,
+            width,
+            height,
+        })
+    }
+
+    /// Tick: poll vdom, resolve layout, render to GPU surface.
+    pub fn update(&mut self) {
+        let animation_time = self.animation_start.elapsed().as_secs_f64();
+
+        self.doc.vdom.mark_all_dirty();
+        let cx = std::task::Context::from_waker(&self.waker);
+        self.doc.poll(Some(cx));
+
+        // Process document::Style messages
+        while let Ok(msg) = self.doc_message_rx.try_recv() {
+            match msg {
+                DocumentMessage::CreateHeadElement {
+                    name,
+                    attributes,
+                    contents,
+                } => {
+                    self.doc.create_head_element(&name, &attributes, &contents);
+                }
+            }
+        }
+
+        self.doc.inner_mut().resolve(animation_time);
+
+        self.scene.reset();
+        paint_scene(
+            &mut VelloScenePainter::new(&mut self.scene),
+            &*self.doc.inner(),
+            self.scale_factor as f64,
+            self.width,
+            self.height,
+        );
+
+        if let Err(e) = self.gpu.render(&self.scene) {
+            tracing::debug!("Embedded view render error: {e}");
+        }
+
+        self.needs_redraw.store(false, Ordering::Relaxed);
+    }
+
+    /// Handle a resize event from the parent window.
+    pub fn resize(&mut self, width: u32, height: u32) {
+        let width = width.max(1);
+        let height = height.max(1);
+
+        if self.width != width || self.height != height {
+            self.width = width;
+            self.height = height;
+            self.gpu.resize(width, height);
+            let viewport = Viewport::new(width, height, self.scale_factor, ColorScheme::Dark);
+            self.doc.inner_mut().set_viewport(viewport);
+        }
+    }
+
+    pub fn size(&self) -> (u32, u32) {
+        (self.width, self.height)
+    }
+}
+
+struct EmbeddedWaker(Arc<AtomicBool>);
+
+impl ArcWake for EmbeddedWaker {
+    fn wake_by_ref(arc_self: &Arc<Self>) {
+        arc_self.0.store(true, Ordering::Relaxed);
+    }
+}

@@ -20,6 +20,8 @@ wgpu.workspace = true
 
 # Utilities
 futures-util = "0.3"
+crossbeam = "0.8"
+raw-window-handle = "0.6"
 tracing.workspace = true
 
 [lints.rust]
