@@ -7,6 +7,9 @@ description = "Dioxus-native overlay rendering for REAPER extensions"
 [dependencies]
 reaper-embed = { path = "../reaper-embed" }
 
+# REAPER API access (low-level for docking, SWELL window management)
+reaper-low.workspace = true
+
 # Dioxus-native with blitz rendering
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }

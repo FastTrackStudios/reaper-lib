@@ -4822,6 +4822,7 @@ dependencies = [
  "futures-util",
  "raw-window-handle 0.6.2",
  "reaper-embed",
+ "reaper-low",
  "tracing",
  "vello",
  "wgpu 26.0.1",

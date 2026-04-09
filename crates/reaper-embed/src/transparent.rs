@@ -115,9 +115,9 @@ impl HasDisplayHandle for NativeHandleWrapper {
 }
 
 /// Returns a reference to the shared Xlib function table and display pointer.
-/// Used by `platform.rs` for screen queries.
+/// Used by `platform.rs` for screen queries and by `reaper-dioxus` for window handles.
 #[cfg(target_os = "linux")]
-pub(crate) fn x11_display() -> (&'static x11_dl::xlib::Xlib, *mut x11_dl::xlib::Display) {
+pub fn x11_display() -> (&'static x11_dl::xlib::Xlib, *mut x11_dl::xlib::Display) {
     (x11_state::xlib(), x11_state::display())
 }
 
