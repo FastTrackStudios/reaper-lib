@@ -115,10 +115,11 @@ impl HasDisplayHandle for NativeHandleWrapper {
 }
 
 /// Returns a reference to the shared Xlib function table and display pointer.
+/// Returns `None` if running headless (no X11 display available).
 /// Used by `platform.rs` for screen queries and by `reaper-dioxus` for window handles.
 #[cfg(target_os = "linux")]
-pub fn x11_display() -> (&'static x11_dl::xlib::Xlib, *mut x11_dl::xlib::Display) {
-    (x11_state::xlib(), x11_state::display())
+pub fn x11_display() -> Option<(&'static x11_dl::xlib::Xlib, *mut x11_dl::xlib::Display)> {
+    Some((x11_state::xlib()?, x11_state::display()?))
 }
 
 // ---------------------------------------------------------------------------
@@ -414,23 +415,32 @@ mod x11_state {
     unsafe impl Send for X11Global {}
     unsafe impl Sync for X11Global {}
 
-    static GLOBAL: OnceLock<X11Global> = OnceLock::new();
+    static GLOBAL: OnceLock<Option<X11Global>> = OnceLock::new();
 
-    fn global() -> &'static X11Global {
+    fn global() -> Option<&'static X11Global> {
         GLOBAL.get_or_init(|| {
-            let xlib = Xlib::open().expect("Failed to load libX11");
+            let xlib = match Xlib::open() {
+                Ok(xlib) => xlib,
+                Err(_) => {
+                    tracing::warn!("Failed to load libX11 — running headless?");
+                    return None;
+                }
+            };
             let display = unsafe { (xlib.XOpenDisplay)(std::ptr::null()) };
-            assert!(!display.is_null(), "Failed to open X11 display");
-            X11Global { xlib, display }
-        })
+            if display.is_null() {
+                tracing::warn!("Failed to open X11 display — running headless?");
+                return None;
+            }
+            Some(X11Global { xlib, display })
+        }).as_ref()
     }
 
-    pub fn xlib() -> &'static Xlib {
-        &global().xlib
+    pub fn xlib() -> Option<&'static Xlib> {
+        global().map(|g| &g.xlib)
     }
 
-    pub fn display() -> *mut Display {
-        global().display
+    pub fn display() -> Option<*mut Display> {
+        global().map(|g| g.display)
     }
 }
 
@@ -446,8 +456,8 @@ fn create_native_transparent_window(
         InputOutput, True, TrueColor, XSetWindowAttributes, XVisualInfo,
     };
 
-    let xlib = x11_state::xlib();
-    let display = x11_state::display();
+    let xlib = x11_state::xlib()?;
+    let display = x11_state::display()?;
 
     unsafe {
         let screen = (xlib.XDefaultScreen)(display);
@@ -495,7 +505,7 @@ fn create_native_transparent_window(
         }
 
         // Set window type to notification/utility — avoids taskbar entry
-        set_x11_atoms(xlib, display, window);
+        set_x11_atoms(&xlib, display, window);
 
         (xlib.XFlush)(display);
 
@@ -563,8 +573,8 @@ fn set_x11_atoms(xlib_fns: &x11_dl::xlib::Xlib, display: *mut x11_dl::xlib::Disp
 
 #[cfg(target_os = "linux")]
 fn show_native_window(hwnd: RawHwnd, show: bool) {
-    let xlib = x11_state::xlib();
-    let display = x11_state::display();
+    let Some(xlib) = x11_state::xlib() else { return };
+    let Some(display) = x11_state::display() else { return };
     let window = hwnd as u64;
 
     unsafe {
@@ -579,8 +589,8 @@ fn show_native_window(hwnd: RawHwnd, show: bool) {
 
 #[cfg(target_os = "linux")]
 fn set_native_window_frame(hwnd: RawHwnd, x: i32, y: i32, width: u32, height: u32) {
-    let xlib = x11_state::xlib();
-    let display = x11_state::display();
+    let Some(xlib) = x11_state::xlib() else { return };
+    let Some(display) = x11_state::display() else { return };
     let window = hwnd as u64;
 
     unsafe {
@@ -591,8 +601,8 @@ fn set_native_window_frame(hwnd: RawHwnd, x: i32, y: i32, width: u32, height: u3
 
 #[cfg(target_os = "linux")]
 fn close_native_window(hwnd: RawHwnd) {
-    let xlib = x11_state::xlib();
-    let display = x11_state::display();
+    let Some(xlib) = x11_state::xlib() else { return };
+    let Some(display) = x11_state::display() else { return };
     let window = hwnd as u64;
 
     unsafe {
@@ -603,8 +613,8 @@ fn close_native_window(hwnd: RawHwnd) {
 
 #[cfg(target_os = "linux")]
 fn set_native_click_through(hwnd: RawHwnd, click_through: bool) {
-    let xlib = x11_state::xlib();
-    let display = x11_state::display();
+    let Some(xlib) = x11_state::xlib() else { return };
+    let Some(display) = x11_state::display() else { return };
     let window = hwnd as u64;
 
     unsafe {

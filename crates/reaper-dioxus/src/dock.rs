@@ -139,7 +139,8 @@ impl HasDisplayHandle for SwellHwndWrapper {
         #[cfg(target_os = "linux")]
         {
             use raw_window_handle::XlibDisplayHandle;
-            let (_, display) = reaper_embed::transparent::x11_display();
+            let (_, display) = reaper_embed::transparent::x11_display()
+                .ok_or(HandleError::Unavailable)?;
             use std::ptr::NonNull;
             let handle = XlibDisplayHandle::new(NonNull::new(display as *mut c_void), 0);
             Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Xlib(handle)) })
