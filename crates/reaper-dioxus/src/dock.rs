@@ -548,6 +548,12 @@ fn hide_panel_inner(panel: &mut LivePanel) {
 
     // Release GPU resources while hidden (re-created on next show)
     panel.view = None;
+    // Clear the embedded_view ExtState flag
+    let reaper = reaper();
+    let section = CString::new(panel.config.id).unwrap();
+    let key = CString::new("embedded_view").unwrap();
+    let val = CString::new("0").unwrap();
+    unsafe { reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true); }
 
     // Destroy X11 child window while hidden
     #[cfg(target_os = "linux")]
@@ -598,6 +604,12 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
         Ok(view) => {
             panel.view = Some(view);
             tracing::info!("Created EmbeddedView for panel '{}'", panel.config.id);
+            // Write ExtState so tests can verify the view was created
+            let reaper = reaper();
+            let section = CString::new(panel.config.id).unwrap();
+            let key = CString::new("embedded_view").unwrap();
+            let val = CString::new("1").unwrap();
+            unsafe { reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true); }
         }
         Err(e) => {
             tracing::warn!("EmbeddedView creation failed for '{}': {}", panel.config.id, e);
