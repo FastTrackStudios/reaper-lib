@@ -17,5 +17,8 @@ thiserror.workspace = true
 cocoa.workspace = true
 objc.workspace = true
 
+[target.'cfg(target_os = "linux")'.dependencies]
+x11-dl = "2.21"
+
 [lints.rust]
 unsafe_code = "allow"

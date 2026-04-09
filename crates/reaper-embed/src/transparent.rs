@@ -3,8 +3,6 @@
 //! A borderless transparent window with GPU rendering via Vello. Click-through
 //! by default — designed for HUD-style overlays that don't intercept input.
 
-use std::ptr::NonNull;
-
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
     RawWindowHandle, WindowHandle,
@@ -26,10 +24,24 @@ pub struct TransparentWindow {
     visible: bool,
 }
 
+// ---------------------------------------------------------------------------
+// NativeHandleWrapper — platform-specific raw-window-handle bridge
+// ---------------------------------------------------------------------------
+
+#[cfg(target_os = "macos")]
 struct NativeHandleWrapper {
-    #[cfg(target_os = "macos")]
     ns_view: *mut std::ffi::c_void,
-    #[cfg(not(target_os = "macos"))]
+}
+
+#[cfg(target_os = "linux")]
+struct NativeHandleWrapper {
+    window: u64,
+    display: *mut std::ffi::c_void,
+    visual_id: u32,
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+struct NativeHandleWrapper {
     _dummy: (),
 }
 
@@ -37,10 +49,13 @@ struct NativeHandleWrapper {
 unsafe impl Send for NativeHandleWrapper {}
 unsafe impl Sync for NativeHandleWrapper {}
 
+// --- macOS HasWindowHandle / HasDisplayHandle ---
+
 #[cfg(target_os = "macos")]
 impl HasWindowHandle for NativeHandleWrapper {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         use raw_window_handle::AppKitWindowHandle;
+        use std::ptr::NonNull;
         let handle =
             AppKitWindowHandle::new(NonNull::new(self.ns_view).ok_or(HandleError::Unavailable)?);
         let raw = RawWindowHandle::AppKit(handle);
@@ -57,38 +72,62 @@ impl HasDisplayHandle for NativeHandleWrapper {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+// --- Linux HasWindowHandle / HasDisplayHandle ---
+
+#[cfg(target_os = "linux")]
+impl HasWindowHandle for NativeHandleWrapper {
+    fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
+        use raw_window_handle::XlibWindowHandle;
+        let mut handle = XlibWindowHandle::new(self.window.try_into().unwrap_or(0));
+        handle.visual_id = self.visual_id.try_into().unwrap_or(0);
+        let raw = RawWindowHandle::Xlib(handle);
+        Ok(unsafe { WindowHandle::borrow_raw(raw) })
+    }
+}
+
+#[cfg(target_os = "linux")]
+impl HasDisplayHandle for NativeHandleWrapper {
+    fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
+        use raw_window_handle::XlibDisplayHandle;
+        use std::ptr::NonNull;
+        let display_ptr =
+            NonNull::new(self.display).ok_or(HandleError::Unavailable)?;
+        let handle = XlibDisplayHandle::new(Some(display_ptr), 0);
+        let raw = RawDisplayHandle::Xlib(handle);
+        Ok(unsafe { DisplayHandle::borrow_raw(raw) })
+    }
+}
+
+// --- Fallback (Windows, etc.) ---
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 impl HasWindowHandle for NativeHandleWrapper {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         Err(HandleError::Unavailable)
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 impl HasDisplayHandle for NativeHandleWrapper {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         Err(HandleError::Unavailable)
     }
 }
 
+// ---------------------------------------------------------------------------
+// TransparentWindow implementation
+// ---------------------------------------------------------------------------
+
 impl TransparentWindow {
     /// Open a new transparent click-through overlay window.
     pub fn open(x: i32, y: i32, width: u32, height: u32) -> Result<Self, GpuError> {
         let bounds = WindowRect::new(x, y, width, height);
 
-        let hwnd = create_native_transparent_window(x, y, width, height);
-        let hwnd = hwnd.ok_or(GpuError::InvalidWindowHandle)?;
+        let (hwnd, handle_wrapper) = create_native_transparent_window(x, y, width, height)
+            .ok_or(GpuError::InvalidWindowHandle)?;
 
         // Make click-through by default
         set_native_click_through(hwnd, true);
-
-        #[cfg(target_os = "macos")]
-        let handle_wrapper = NativeHandleWrapper {
-            ns_view: hwnd as *mut std::ffi::c_void,
-        };
-
-        #[cfg(not(target_os = "macos"))]
-        let handle_wrapper = NativeHandleWrapper { _dummy: () };
 
         let gpu = GpuState::new(&handle_wrapper, width, height)?;
 
@@ -161,12 +200,17 @@ impl Drop for TransparentWindow {
     }
 }
 
-// ---------------------------------------------------------------------------
+// ===========================================================================
 // Platform: macOS (Cocoa)
-// ---------------------------------------------------------------------------
+// ===========================================================================
 
 #[cfg(target_os = "macos")]
-fn create_native_transparent_window(x: i32, y: i32, width: u32, height: u32) -> Option<RawHwnd> {
+fn create_native_transparent_window(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Option<(RawHwnd, NativeHandleWrapper)> {
     use cocoa::appkit::{NSBackingStoreType, NSWindow, NSWindowStyleMask};
     use cocoa::base::{NO, YES, id, nil};
     use cocoa::foundation::{NSPoint, NSRect, NSSize};
@@ -230,19 +274,12 @@ fn create_native_transparent_window(x: i32, y: i32, width: u32, height: u32) -> 
 
         tracing::debug!(x, y, width, height, "Created transparent overlay window");
 
-        Some(content_view as RawHwnd)
-    }
-}
+        let wrapper = NativeHandleWrapper {
+            ns_view: content_view as *mut std::ffi::c_void,
+        };
 
-#[cfg(not(target_os = "macos"))]
-fn create_native_transparent_window(
-    _x: i32,
-    _y: i32,
-    _width: u32,
-    _height: u32,
-) -> Option<RawHwnd> {
-    tracing::warn!("Transparent windows not yet implemented on this platform");
-    None
+        Some((content_view as RawHwnd, wrapper))
+    }
 }
 
 #[cfg(target_os = "macos")]
@@ -266,9 +303,6 @@ fn show_native_window(ns_view: RawHwnd, show: bool) {
         }
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-fn show_native_window(_hwnd: RawHwnd, _show: bool) {}
 
 #[cfg(target_os = "macos")]
 fn set_native_window_frame(ns_view: RawHwnd, x: i32, y: i32, width: u32, height: u32) {
@@ -310,9 +344,6 @@ fn set_native_window_frame(ns_view: RawHwnd, x: i32, y: i32, width: u32, height:
     }
 }
 
-#[cfg(not(target_os = "macos"))]
-fn set_native_window_frame(_hwnd: RawHwnd, _x: i32, _y: i32, _width: u32, _height: u32) {}
-
 #[cfg(target_os = "macos")]
 fn close_native_window(ns_view: RawHwnd) {
     use cocoa::base::id;
@@ -329,9 +360,6 @@ fn close_native_window(ns_view: RawHwnd) {
         }
     }
 }
-
-#[cfg(not(target_os = "macos"))]
-fn close_native_window(_hwnd: RawHwnd) {}
 
 #[cfg(target_os = "macos")]
 fn set_native_click_through(ns_view: RawHwnd, click_through: bool) {
@@ -352,5 +380,282 @@ fn set_native_click_through(ns_view: RawHwnd, click_through: bool) {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+// ===========================================================================
+// Platform: Linux (X11)
+// ===========================================================================
+
+#[cfg(target_os = "linux")]
+mod x11_state {
+    use std::sync::OnceLock;
+    use x11_dl::xlib::Xlib;
+
+    /// Process-global Xlib function table. Loaded once, never unloaded.
+    static XLIB: OnceLock<Xlib> = OnceLock::new();
+
+    pub fn xlib() -> &'static Xlib {
+        XLIB.get_or_init(|| Xlib::open().expect("Failed to load libX11"))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn create_native_transparent_window(
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Option<(RawHwnd, NativeHandleWrapper)> {
+    use x11_dl::xlib::{
+        AllocNone, CWBackPixel, CWBorderPixel, CWColormap, CWOverrideRedirect,
+        InputOutput, True, TrueColor, XSetWindowAttributes, XVisualInfo,
+    };
+
+    let xlib = x11_state::xlib();
+
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            tracing::error!("Failed to open X11 display");
+            return None;
+        }
+
+        let screen = (xlib.XDefaultScreen)(display);
+        let root = (xlib.XRootWindow)(display, screen);
+
+        // Find a 32-bit ARGB visual for transparency
+        let mut visual_info = std::mem::zeroed::<XVisualInfo>();
+        let found = (xlib.XMatchVisualInfo)(display, screen, 32, TrueColor, &mut visual_info);
+        if found == 0 {
+            tracing::error!("No 32-bit ARGB visual available — compositor required");
+            (xlib.XCloseDisplay)(display);
+            return None;
+        }
+
+        // Create a colormap for the 32-bit visual
+        let colormap =
+            (xlib.XCreateColormap)(display, root, visual_info.visual, AllocNone);
+
+        let mut attrs: XSetWindowAttributes = std::mem::zeroed();
+        attrs.override_redirect = True;
+        attrs.colormap = colormap;
+        attrs.border_pixel = 0;
+        attrs.background_pixel = 0; // Transparent (ARGB 0x00000000)
+
+        let attr_mask = CWOverrideRedirect | CWColormap | CWBorderPixel | CWBackPixel;
+
+        let window = (xlib.XCreateWindow)(
+            display,
+            root,
+            x,
+            y,
+            width,
+            height,
+            0, // border width
+            32, // depth — must match visual
+            InputOutput as u32,
+            visual_info.visual,
+            attr_mask,
+            &mut attrs,
+        );
+
+        if window == 0 {
+            tracing::error!("Failed to create X11 window");
+            (xlib.XFreeColormap)(display, colormap);
+            (xlib.XCloseDisplay)(display);
+            return None;
+        }
+
+        // Set window type to notification/utility — avoids taskbar entry
+        set_x11_atoms(xlib, display, window);
+
+        (xlib.XFlush)(display);
+
+        tracing::debug!(x, y, width, height, "Created X11 transparent overlay window");
+
+        let visual_id = visual_info.visualid as u32;
+
+        // We store the Display* and Window as the "hwnd". Since we need both,
+        // we use the wrapper for the display and pack the X11 Window as the hwnd.
+        let wrapper = NativeHandleWrapper {
+            window,
+            display: display as *mut std::ffi::c_void,
+            visual_id,
+        };
+
+        // Use the window XID cast to pointer as the RawHwnd for the platform functions.
+        // We'll recover it via the NativeHandleWrapper stored alongside.
+        Some((window as RawHwnd, wrapper))
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_x11_atoms(xlib_fns: &x11_dl::xlib::Xlib, display: *mut x11_dl::xlib::Display, window: u64) {
+    use std::ffi::CString;
+    use x11_dl::xlib::{False, PropModeReplace, XA_ATOM};
+
+    unsafe {
+        let atom_name = |name: &str| {
+            let c = CString::new(name).unwrap();
+            (xlib_fns.XInternAtom)(display, c.as_ptr(), False)
+        };
+
+        // Window type: utility (floats above, no taskbar)
+        let wm_type = atom_name("_NET_WM_WINDOW_TYPE");
+        let wm_type_utility = atom_name("_NET_WM_WINDOW_TYPE_UTILITY");
+        (xlib_fns.XChangeProperty)(
+            display,
+            window,
+            wm_type,
+            XA_ATOM,
+            32,
+            PropModeReplace,
+            &wm_type_utility as *const u64 as *const u8,
+            1,
+        );
+
+        // State: above + skip taskbar + skip pager
+        let wm_state = atom_name("_NET_WM_STATE");
+        let wm_state_above = atom_name("_NET_WM_STATE_ABOVE");
+        let wm_skip_taskbar = atom_name("_NET_WM_STATE_SKIP_TASKBAR");
+        let wm_skip_pager = atom_name("_NET_WM_STATE_SKIP_PAGER");
+        let state_atoms = [wm_state_above, wm_skip_taskbar, wm_skip_pager];
+        (xlib_fns.XChangeProperty)(
+            display,
+            window,
+            wm_state,
+            XA_ATOM,
+            32,
+            PropModeReplace,
+            state_atoms.as_ptr() as *const u8,
+            state_atoms.len() as i32,
+        );
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn show_native_window(hwnd: RawHwnd, show: bool) {
+    let xlib = x11_state::xlib();
+    let window = hwnd as u64;
+
+    // We need the display — retrieve it from the process-global connection.
+    // Since we used XOpenDisplay(null) which gives us the default display,
+    // we can re-open it (X11 ref-counts connections per process).
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        if show {
+            (xlib.XMapRaised)(display, window);
+        } else {
+            (xlib.XUnmapWindow)(display, window);
+        }
+        (xlib.XFlush)(display);
+        (xlib.XCloseDisplay)(display);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_native_window_frame(hwnd: RawHwnd, x: i32, y: i32, width: u32, height: u32) {
+    let xlib = x11_state::xlib();
+    let window = hwnd as u64;
+
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        (xlib.XMoveResizeWindow)(display, window, x, y, width, height);
+        (xlib.XFlush)(display);
+        (xlib.XCloseDisplay)(display);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn close_native_window(hwnd: RawHwnd) {
+    let xlib = x11_state::xlib();
+    let window = hwnd as u64;
+
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+        (xlib.XDestroyWindow)(display, window);
+        (xlib.XFlush)(display);
+        (xlib.XCloseDisplay)(display);
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn set_native_click_through(hwnd: RawHwnd, click_through: bool) {
+    // Use the XShape extension to make the window input-transparent.
+    // Setting ShapeInput to an empty region means all clicks pass through.
+    let xlib = x11_state::xlib();
+    let window = hwnd as u64;
+
+    unsafe {
+        let display = (xlib.XOpenDisplay)(std::ptr::null());
+        if display.is_null() {
+            return;
+        }
+
+        // Try to load the XShape extension
+        if let Ok(xfixes) = x11_dl::xfixes::Xlib::open() {
+            if click_through {
+                // Create an empty region (no input area → all clicks pass through)
+                let region = (xfixes.XFixesCreateRegion)(display, std::ptr::null_mut(), 0);
+                (xfixes.XFixesSetWindowShapeRegion)(
+                    display,
+                    window,
+                    2, // ShapeInput
+                    0,
+                    0,
+                    region,
+                );
+                (xfixes.XFixesDestroyRegion)(display, region);
+            } else {
+                // Reset to normal (accept input everywhere)
+                (xfixes.XFixesSetWindowShapeRegion)(
+                    display,
+                    window,
+                    2, // ShapeInput
+                    0,
+                    0,
+                    0, // None — reset to default
+                );
+            }
+        } else {
+            tracing::warn!("XFixes extension not available — click-through not supported");
+        }
+
+        (xlib.XFlush)(display);
+        (xlib.XCloseDisplay)(display);
+    }
+}
+
+// ===========================================================================
+// Platform: Fallback (unsupported)
+// ===========================================================================
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn create_native_transparent_window(
+    _x: i32,
+    _y: i32,
+    _width: u32,
+    _height: u32,
+) -> Option<(RawHwnd, NativeHandleWrapper)> {
+    tracing::warn!("Transparent windows not yet implemented on this platform");
+    None
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn show_native_window(_hwnd: RawHwnd, _show: bool) {}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn set_native_window_frame(_hwnd: RawHwnd, _x: i32, _y: i32, _width: u32, _height: u32) {}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+fn close_native_window(_hwnd: RawHwnd) {}
+
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 fn set_native_click_through(_hwnd: RawHwnd, _click_through: bool) {}

@@ -45,8 +45,27 @@ pub fn main_screen_height() -> f64 {
     }
 }
 
-/// Stub for non-macOS platforms.
-#[cfg(not(target_os = "macos"))]
+/// Returns the height of the main screen in pixels (Linux/X11).
+#[cfg(target_os = "linux")]
+pub fn main_screen_height() -> f64 {
+    let xlib = x11_dl::xlib::Xlib::open().ok();
+    match xlib {
+        Some(xlib) => unsafe {
+            let display = (xlib.XOpenDisplay)(std::ptr::null());
+            if display.is_null() {
+                return 1080.0;
+            }
+            let screen = (xlib.XDefaultScreen)(display);
+            let height = (xlib.XDisplayHeight)(display, screen);
+            (xlib.XCloseDisplay)(display);
+            height as f64
+        },
+        None => 1080.0,
+    }
+}
+
+/// Stub for unsupported platforms.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
 pub fn main_screen_height() -> f64 {
     1080.0
 }

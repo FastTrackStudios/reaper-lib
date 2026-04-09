@@ -12,9 +12,8 @@ use raw_window_handle::{
 use thiserror::Error;
 use vello::{AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions, Scene};
 use wgpu::{
-    Adapter, Device, Extent3d, Features, Instance, MemoryHints, Queue, RequestAdapterError,
-    Surface, SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat,
-    TextureUsages,
+    Adapter, Device, Extent3d, Features, Instance, MemoryHints, Queue, Surface,
+    SurfaceConfiguration, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
 };
 
 #[derive(Debug, Error)]
@@ -23,7 +22,7 @@ pub enum GpuError {
     SurfaceCreation(#[from] wgpu::CreateSurfaceError),
 
     #[error("No compatible GPU adapter found: {0}")]
-    NoAdapter(#[from] RequestAdapterError),
+    NoAdapter(#[from] wgpu::RequestAdapterError),
 
     #[error("Failed to request GPU device: {0}")]
     DeviceRequest(#[from] wgpu::RequestDeviceError),
@@ -120,8 +119,7 @@ impl GpuState {
                 required_features: features,
                 required_limits: limits,
                 memory_hints: MemoryHints::Performance,
-                trace: wgpu::Trace::default(),
-                experimental_features: Default::default(),
+                trace: wgpu::Trace::Off,
             }))?;
 
         let surface_caps = surface.get_capabilities(&adapter);

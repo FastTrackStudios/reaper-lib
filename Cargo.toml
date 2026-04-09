@@ -1,6 +1,7 @@
 [workspace]
 members = [
     "crates/reaper-embed",
+    "crates/reaper-dioxus",
     "crates/swell-ui",
 ]
 resolver = "2"
@@ -39,9 +40,30 @@ winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
 libloading = "0.9"
 
 # reaper-embed dependencies
-wgpu = { version = "27", features = ["wgsl"] }
-vello = { version = "0.7", features = ["wgpu"] }
-skrifa = "0.40"
+wgpu = { version = "26", features = ["wgsl"] }
+vello = { version = "0.6", features = ["wgpu"] }
+skrifa = "0.37"
 pollster = "0.4"
 cocoa = "0.26"
 objc = "0.2.7"
+
+# Patched blitz rendering stack (same fork as FTS-Plugins)
+[patch."https://github.com/DioxusLabs/blitz.git"]
+dioxus-native = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+stylo_taffy = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "45bc77fb" }
+
+# Anyrender fork (same as FTS-Plugins)
+[patch.crates-io]
+anyrender = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello_cpu = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+anyrender_svg = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+wgpu_context = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }

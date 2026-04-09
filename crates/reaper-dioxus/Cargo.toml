@@ -1,0 +1,26 @@
+[package]
+name = "reaper-dioxus"
+version = "0.1.0"
+edition = "2024"
+description = "Dioxus-native overlay rendering for REAPER extensions"
+
+[dependencies]
+reaper-embed = { path = "../reaper-embed" }
+
+# Dioxus-native with blitz rendering
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
+blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
+blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
+blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
+
+# Rendering pipeline
+anyrender_vello = "0.6"
+vello.workspace = true
+wgpu.workspace = true
+
+# Utilities
+futures-util = "0.3"
+tracing.workspace = true
+
+[lints.rust]
+unsafe_code = "allow"
