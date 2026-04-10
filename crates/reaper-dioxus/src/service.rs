@@ -47,9 +47,9 @@ pub fn is_available() -> bool {
     SERVICE.get().is_some_and(|s| s.initialized)
 }
 
-/// Initialize the service. Called once by the reaper-dioxus extension.
+/// Initialize the service. Call once at startup before registering panels.
 /// Returns false if already initialized.
-pub(crate) fn init() -> bool {
+pub fn init() -> bool {
     SERVICE
         .set(ServiceState { initialized: true })
         .is_ok()
@@ -91,29 +91,33 @@ pub fn register_panels(defs: &[PanelDef]) {
 /// Toggle a panel's visibility.
 pub fn toggle(id: &str) {
     if !is_available() { return; }
+    // Leak the string to get 'static lifetime — panel IDs are process-lifetime
+    let id: &'static str = Box::leak(id.to_string().into_boxed_str());
     crate::dock::toggle_panel(id);
 }
 
 /// Show a panel.
 pub fn show(id: &str) {
     if !is_available() { return; }
+    let id: &'static str = Box::leak(id.to_string().into_boxed_str());
     crate::dock::show_panel(id);
 }
 
 /// Hide a panel.
 pub fn hide(id: &str) {
     if !is_available() { return; }
+    let id: &'static str = Box::leak(id.to_string().into_boxed_str());
     crate::dock::hide_panel(id);
 }
 
 /// Check if a panel is visible.
 pub fn is_visible(id: &str) -> bool {
     if !is_available() { return false; }
+    let id: &'static str = Box::leak(id.to_string().into_boxed_str());
     crate::dock::is_panel_visible(id)
 }
 
 /// Update all registered panels (called from the timer callback).
-/// Only the reaper-dioxus extension should call this.
-pub(crate) fn tick() {
+pub fn tick() {
     crate::dock::update_panels();
 }
