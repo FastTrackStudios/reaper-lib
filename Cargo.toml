@@ -2,6 +2,7 @@
 members = [
     "crates/reaper-embed",
     "crates/reaper-dioxus",
+    "crates/reaper-dioxus-ext",
     "crates/swell-ui",
 ]
 resolver = "2"
@@ -18,7 +19,12 @@ authors = ["FastTrack Studio"]
 # REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
 reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 reaper-common-types = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
+
+# DAW module system
+daw = { path = "../daw/crates/daw" }
 
 # Common
 tracing = { version = "0.1", features = ["std"] }

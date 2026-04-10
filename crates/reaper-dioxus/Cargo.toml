@@ -7,6 +7,9 @@ description = "Dioxus-native overlay rendering for REAPER extensions"
 [dependencies]
 reaper-embed = { path = "../reaper-embed" }
 
+# DAW module system (for PanelDef type)
+daw.workspace = true
+
 # REAPER API access (low-level for docking, SWELL window management)
 reaper-low.workspace = true
 

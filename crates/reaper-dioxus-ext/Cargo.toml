@@ -1,0 +1,22 @@
+[package]
+name = "reaper-dioxus-ext"
+version = "0.1.0"
+edition = "2024"
+description = "REAPER extension providing Dioxus rendering as a service (like ReaImGui)"
+
+[lib]
+crate-type = ["cdylib"]
+name = "reaper_dioxus"
+path = "src/lib.rs"
+
+[dependencies]
+reaper-dioxus = { path = "../reaper-dioxus" }
+reaper-low.workspace = true
+reaper-medium = { workspace = true }
+reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+tracing.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[lints.rust]
+unsafe_code = "allow"
