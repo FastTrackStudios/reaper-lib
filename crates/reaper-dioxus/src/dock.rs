@@ -27,7 +27,8 @@ use crate::embedded::EmbeddedView;
 // Types
 // ---------------------------------------------------------------------------
 
-type PanelId = &'static str;
+// PanelId can be &str for lookups (HashMap<String> supports .get(&str))
+type PanelId = &'static str; // Registration still uses &'static str for config IDs
 
 /// Configuration for a dockable panel.
 #[derive(Clone)]
@@ -84,11 +85,18 @@ thread_local! {
 static REAPER_API: std::sync::OnceLock<&'static Reaper> = std::sync::OnceLock::new();
 static SWELL_API: std::sync::OnceLock<&'static Swell> = std::sync::OnceLock::new();
 
+/// Initialize the dock module with REAPER/SWELL API references.
+/// Must be called before `register_panel_from_service`.
+pub fn init(reaper: &'static Reaper, swell: &'static Swell) {
+    let _ = REAPER_API.set(reaper);
+    let _ = SWELL_API.set(swell);
+}
+
 fn reaper() -> &'static Reaper {
-    REAPER_API.get().expect("register_panel must be called first")
+    REAPER_API.get().expect("dock::init() must be called first")
 }
 fn swell() -> &'static Swell {
-    SWELL_API.get().expect("register_panel must be called first")
+    SWELL_API.get().expect("dock::init() must be called first")
 }
 
 /// Assert we're on the main thread (debug builds only).
@@ -381,6 +389,40 @@ pub fn register_panel(
 
     PANELS.with(|panels| { panels.borrow_mut().insert(id, panel); });
     tracing::debug!(id, dock_position, "Registered dockable panel");
+}
+
+/// Register a panel from a DawModule PanelDef (service API).
+pub fn register_panel_from_service(def: &daw::module::PanelDef) {
+    use dioxus_native::prelude::Element;
+
+    let reaper = reaper();
+    let swell = swell();
+
+    // Cast the type-erased component pointer back to fn() -> Element
+    let component: fn() -> Element = unsafe { std::mem::transmute(def.component.as_ptr()) };
+
+    let dock_pos = match def.default_dock {
+        daw::module::DockPosition::Bottom => 0,
+        daw::module::DockPosition::Left => 1,
+        daw::module::DockPosition::Top => 2,
+        daw::module::DockPosition::Right => 3,
+        daw::module::DockPosition::Floating => -1,
+    };
+
+    register_panel(
+        DockablePanelConfig {
+            id: def.id,
+            title: def.title,
+            default_dock_position: dock_pos,
+            app: component,
+            default_width: def.default_size.0 as u32,
+            default_height: def.default_size.1 as u32,
+            show_on_first_launch: false,
+        },
+        Vec::new(),
+        reaper,
+        swell,
+    );
 }
 
 pub fn toggle_panel(id: PanelId) {
