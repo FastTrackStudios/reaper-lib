@@ -526,25 +526,6 @@ pub fn update_panels() {
                 continue;
             }
 
-            // Track SWELL HWND visibility — hide/show X11 child to match.
-            // This handles tab switches, dock minimization, etc.
-            #[cfg(target_os = "linux")]
-            {
-                let hwnd_visible = unsafe { swell.IsWindowVisible(panel.hwnd) };
-                if panel.x11_child_xid != 0 {
-                    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                        if hwnd_visible {
-                            unsafe { (xlib.XMapWindow)(display, panel.x11_child_xid); }
-                        } else {
-                            unsafe { (xlib.XUnmapWindow)(display, panel.x11_child_xid); }
-                        }
-                    }
-                }
-                if !hwnd_visible {
-                    continue; // Skip rendering when hidden
-                }
-            }
-
             // Deferred EmbeddedView init (max 30 retries ≈ 1 second)
             if panel.view.is_none() && panel.init_attempts < 30 {
                 try_init_embedded_view(panel);
@@ -862,11 +843,58 @@ unsafe extern "C" fn panel_wndproc(
     wparam: raw::WPARAM,
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
+    unsafe { panel_wndproc_inner(hwnd, msg, wparam, lparam) }
+}
+
+fn panel_wndproc_inner(
+    hwnd: raw::HWND,
+    msg: raw::UINT,
+    wparam: raw::WPARAM,
+    lparam: raw::LPARAM,
+) -> raw::LRESULT {
     const WM_SIZE: u32 = 0x0005;
+    const WM_SHOWWINDOW: u32 = 0x0018;
     const WM_DESTROY: u32 = 0x0002;
 
     match msg {
         WM_SIZE => 0,
+        WM_SHOWWINDOW => {
+            let showing = wparam != 0;
+            PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+                    if showing {
+                        panel.visible = true;
+                        panel.init_attempts = 0;
+                        #[cfg(target_os = "linux")]
+                        if panel.x11_child_xid != 0 {
+                            if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+                                unsafe {
+                                    (xlib.XMapWindow)(display, panel.x11_child_xid);
+                                    (xlib.XFlush)(display);
+                                }
+                            }
+                        }
+                    } else {
+                        panel.visible = false;
+                        panel.view = None;
+                        #[cfg(target_os = "linux")]
+                        {
+                            if panel.x11_child_xid != 0 {
+                                if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+                                    unsafe {
+                                        (xlib.XUnmapWindow)(display, panel.x11_child_xid);
+                                        (xlib.XFlush)(display);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    tracing::info!(showing, panel = panel.config.id, "WM_SHOWWINDOW");
+                }
+            });
+            0
+        }
         WM_DESTROY => {
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
