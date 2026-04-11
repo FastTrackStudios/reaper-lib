@@ -53,6 +53,9 @@ struct LivePanel {
     /// Destroyed on panel close to prevent resource leaks.
     #[cfg(target_os = "linux")]
     x11_child_xid: u64,
+    /// Parent GDK window XID (Linux only). Used to reposition the child.
+    #[cfg(target_os = "linux")]
+    x11_parent_xid: u64,
     /// Track failed init attempts to avoid infinite retry spam.
     init_attempts: u32,
 }
@@ -326,18 +329,63 @@ fn create_x11_render_child(
     Some((window, visual_id))
 }
 
-/// Resize the X11 child window to match the panel's client area.
+/// Reposition and resize the X11 child window to match the panel's client area.
 #[cfg(target_os = "linux")]
 fn resize_x11_child(xid: u64, width: u32, height: u32) {
     if xid == 0 {
         return;
     }
+    // Position is handled separately by reposition_x11_child_to_panel
     if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
         unsafe {
-            (xlib.XMoveResizeWindow)(display, xid, 0, 0, width, height);
+            (xlib.XResizeWindow)(display, xid, width, height);
             (xlib.XFlush)(display);
         }
     }
+}
+
+/// Position the X11 child window at the dock panel's screen position
+/// relative to its parent GDK window.
+#[cfg(target_os = "linux")]
+fn reposition_x11_child_to_panel(
+    hwnd: raw::HWND,
+    child_xid: u64,
+    parent_xid: u64,
+    swell: &Swell,
+) {
+    if child_xid == 0 || parent_xid == 0 {
+        return;
+    }
+
+    // Get the panel's screen position via SWELL
+    let mut panel_rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+    unsafe { swell.GetWindowRect(hwnd, &mut panel_rect); }
+
+    let Some((xlib, display)) = reaper_embed::transparent::x11_display() else { return };
+
+    // Translate panel's screen coords to parent-relative coords
+    let root = unsafe { (xlib.XDefaultRootWindow)(display) };
+    let mut dest_x: c_int = 0;
+    let mut dest_y: c_int = 0;
+    let mut dummy_child: u64 = 0;
+    unsafe {
+        (xlib.XTranslateCoordinates)(
+            display,
+            root,
+            parent_xid,
+            panel_rect.left,
+            panel_rect.top,
+            &mut dest_x,
+            &mut dest_y,
+            &mut dummy_child,
+        );
+        (xlib.XMoveWindow)(display, child_xid, dest_x, dest_y);
+    }
+    tracing::trace!(
+        child_xid, parent_xid, dest_x, dest_y,
+        panel_left = panel_rect.left, panel_top = panel_rect.top,
+        "Repositioned X11 child"
+    );
 }
 
 // ---------------------------------------------------------------------------
@@ -384,6 +432,8 @@ pub fn register_panel(
         contexts,
         #[cfg(target_os = "linux")]
         x11_child_xid: 0,
+        #[cfg(target_os = "linux")]
+        x11_parent_xid: 0,
         init_attempts: 0,
     };
 
@@ -469,9 +519,30 @@ pub fn update_panels() {
 
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
+        let swell = swell();
+
         for panel in panels.values_mut() {
             if !panel.visible {
                 continue;
+            }
+
+            // Track SWELL HWND visibility — hide/show X11 child to match.
+            // This handles tab switches, dock minimization, etc.
+            #[cfg(target_os = "linux")]
+            {
+                let hwnd_visible = unsafe { swell.IsWindowVisible(panel.hwnd) };
+                if panel.x11_child_xid != 0 {
+                    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+                        if hwnd_visible {
+                            unsafe { (xlib.XMapWindow)(display, panel.x11_child_xid); }
+                        } else {
+                            unsafe { (xlib.XUnmapWindow)(display, panel.x11_child_xid); }
+                        }
+                    }
+                }
+                if !hwnd_visible {
+                    continue; // Skip rendering when hidden
+                }
             }
 
             // Deferred EmbeddedView init (max 30 retries ≈ 1 second)
@@ -480,7 +551,6 @@ pub fn update_panels() {
             }
 
             if let Some(view) = &mut panel.view {
-                let swell = swell();
                 let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
                 unsafe { swell.GetClientRect(panel.hwnd, &mut rect); }
                 let w = (rect.right - rect.left).unsigned_abs();
@@ -490,13 +560,17 @@ pub fn update_panels() {
                     let (cur_w, cur_h) = view.size();
                     if w != cur_w || h != cur_h {
                         view.resize(w, h);
-                        // Also resize the X11 child window
                         #[cfg(target_os = "linux")]
                         resize_x11_child(panel.x11_child_xid, w, h);
                     }
-                    // Mark dirty since dock panels read global state
-                    // without reactive signals. TODO: use Dioxus signals
-                    // to avoid unnecessary redraws.
+                    // Reposition X11 child to track dock panel movement
+                    #[cfg(target_os = "linux")]
+                    if panel.x11_child_xid != 0 && panel.x11_parent_xid != 0 {
+                        reposition_x11_child_to_panel(
+                            panel.hwnd, panel.x11_child_xid,
+                            panel.x11_parent_xid, swell,
+                        );
+                    }
                     view.mark_dirty();
                     view.update();
                 }
@@ -622,12 +696,18 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
         return;
     }
     panel.init_attempts += 1;
+    tracing::info!(
+        panel = panel.config.id,
+        attempt = panel.init_attempts,
+        "Attempting to init EmbeddedView"
+    );
 
     let swell = swell();
     let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
     unsafe { swell.GetClientRect(panel.hwnd, &mut rect); }
     let w = (rect.right - rect.left).unsigned_abs().max(panel.config.default_width);
     let h = (rect.bottom - rect.top).unsigned_abs().max(panel.config.default_height);
+    tracing::info!(w, h, "Panel '{}' client rect", panel.config.id);
 
     // Try to get a render surface
     let surface = create_render_surface(panel, swell, w, h);
@@ -659,26 +739,31 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
     }
 }
 
-/// Create a RenderSurface for the panel. Tries GDK path first, falls back to X11.
+/// Create a RenderSurface for the panel.
+///
+/// On Linux, SWELL dock panels don't get their own GDK window, so we
+/// create an X11 child window inside the nearest ancestor that has a
+/// GDK window (the dock container). The child is positioned and resized
+/// by `update_panels` to match the dock panel's client rect.
 #[cfg(target_os = "linux")]
 fn create_render_surface(panel: &mut LivePanel, swell: &Swell, w: u32, h: u32) -> Option<RenderSurface> {
-    // Try GDK path: extract XID from SWELL HWND (or its parent chain)
-    let gdk_xid = gdk::extract_xid(panel.hwnd, swell);
-    if gdk_xid != 0 {
-        tracing::info!(xid = gdk_xid, "Using GDK XID for panel '{}'", panel.config.id);
-        return Some(RenderSurface {
-            hwnd: panel.hwnd,
-            xid: gdk_xid,
-            visual_id: 0, // GDK manages the visual
-        });
+    // Find the nearest ancestor GDK window to use as X11 parent
+    let parent_xid = gdk::extract_xid(panel.hwnd, swell);
+    tracing::info!(parent_xid, "GDK XID lookup for panel '{}'", panel.config.id);
+    if parent_xid == 0 {
+        tracing::warn!("No GDK XID found for panel '{}'", panel.config.id);
+        return None;
     }
 
-    // GDK path failed — create X11 child window with proper 32-bit visual.
-    // Try to reparent into the dock panel's parent GDK window.
-    let parent_xid = find_parent_xid(panel.hwnd, swell);
-
+    // Create an X11 child window inside the dock container's GDK window.
+    // This child is repositioned each tick to match the panel's position.
     let (xid, visual_id) = create_x11_render_child(parent_xid, w, h)?;
     panel.x11_child_xid = xid;
+    panel.x11_parent_xid = parent_xid;
+
+    // Position the child window at the dock panel's offset within the parent
+    reposition_x11_child_to_panel(panel.hwnd, xid, parent_xid, swell);
+
     tracing::info!(xid, parent_xid, visual_id, "Created X11 render child for '{}'", panel.config.id);
 
     Some(RenderSurface {
