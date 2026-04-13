@@ -212,6 +212,12 @@ impl EmbeddedView {
     pub fn size(&self) -> (u32, u32) {
         (self.width, self.height)
     }
+
+    /// Forward a UI event (mouse, keyboard) to the Blitz document.
+    pub fn handle_event(&mut self, event: blitz_traits::events::UiEvent) {
+        self.doc.handle_ui_event(event);
+        self.needs_redraw.store(true, Ordering::Relaxed);
+    }
 }
 
 struct EmbeddedWaker(Arc<AtomicBool>);

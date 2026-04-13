@@ -27,6 +27,9 @@ wgpu.workspace = true
 # Hot reload (enabled by default for dev, disable for release)
 dioxus-devtools = { version = "0.7", optional = true }
 
+# Event types for forwarding input to Blitz
+keyboard-types = "0.7"
+
 # Utilities
 futures-util = "0.3"
 crossbeam = "0.8"

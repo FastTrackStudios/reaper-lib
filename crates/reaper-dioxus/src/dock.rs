@@ -894,6 +894,71 @@ fn gdk_get_xid_fn() -> Option<unsafe extern "C" fn(*mut c_void) -> u64> {
 }
 
 // ---------------------------------------------------------------------------
+// Event forwarding
+// ---------------------------------------------------------------------------
+
+/// Forward a UI event to the panel's EmbeddedView.
+fn forward_mouse_event(hwnd: raw::HWND, event: blitz_traits::events::UiEvent) {
+    PANELS.with(|panels| {
+        let mut panels = panels.borrow_mut();
+        if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+            if let Some(view) = &mut panel.view {
+                view.handle_event(event);
+            }
+        }
+    });
+}
+
+/// Map SWELL virtual key codes to keyboard_types::Key.
+fn swell_vk_to_key(vk: u32) -> keyboard_types::Key {
+    use keyboard_types::Key;
+    match vk {
+        0x08 => Key::Backspace,
+        0x09 => Key::Tab,
+        0x0D => Key::Enter,
+        0x1B => Key::Escape,
+        0x20 => Key::Character(" ".to_string()),
+        0x25 => Key::ArrowLeft,
+        0x26 => Key::ArrowUp,
+        0x27 => Key::ArrowRight,
+        0x28 => Key::ArrowDown,
+        0x2E => Key::Delete,
+        0x24 => Key::Home,
+        0x23 => Key::End,
+        0x21 => Key::PageUp,
+        0x22 => Key::PageDown,
+        0x70..=0x7B => Key::F1, // F1-F12 (simplified)
+        0x30..=0x39 => Key::Character(char::from_u32(vk).unwrap_or('0').to_string()),
+        0x41..=0x5A => Key::Character(char::from_u32(vk + 32).unwrap_or('a').to_string()),
+        _ => Key::Unidentified,
+    }
+}
+
+/// Map SWELL virtual key codes to keyboard_types::Code.
+fn swell_vk_to_code(vk: u32) -> keyboard_types::Code {
+    use keyboard_types::Code;
+    match vk {
+        0x08 => Code::Backspace,
+        0x09 => Code::Tab,
+        0x0D => Code::Enter,
+        0x1B => Code::Escape,
+        0x20 => Code::Space,
+        0x25 => Code::ArrowLeft,
+        0x26 => Code::ArrowUp,
+        0x27 => Code::ArrowRight,
+        0x28 => Code::ArrowDown,
+        0x2E => Code::Delete,
+        0x30 => Code::Digit0,
+        0x31 => Code::Digit1,
+        0x32 => Code::Digit2,
+        0x41 => Code::KeyA,
+        0x42 => Code::KeyB,
+        0x43 => Code::KeyC,
+        _ => Code::Unidentified,
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Window creation
 // ---------------------------------------------------------------------------
 
@@ -944,12 +1009,127 @@ fn panel_wndproc_inner(
     const WM_SIZE: u32 = 0x0005;
     const WM_CLOSE: u32 = 0x0010;
     const WM_SHOWWINDOW: u32 = 0x0018;
+    const WM_MOUSEMOVE: u32 = 0x0200;
+    const WM_LBUTTONDOWN: u32 = 0x0201;
+    const WM_LBUTTONUP: u32 = 0x0202;
+    const WM_RBUTTONDOWN: u32 = 0x0204;
+    const WM_RBUTTONUP: u32 = 0x0205;
+    const WM_MBUTTONDOWN: u32 = 0x0207;
+    const WM_MBUTTONUP: u32 = 0x0208;
+    const WM_MOUSEWHEEL: u32 = 0x020A;
+    const WM_KEYDOWN: u32 = 0x0100;
+    const WM_KEYUP: u32 = 0x0101;
+    const WM_CHAR: u32 = 0x0102;
     const WM_COMMAND: u32 = 0x0111;
     const IDCANCEL: u32 = 2;
 
     match msg {
-        // Docker close button sends WM_COMMAND with IDCANCEL.
-        // Just hide — REAPER manages the dock tab lifecycle.
+        // ── Mouse events ────────────────────────────────────────────
+        WM_MOUSEMOVE => {
+            let x = (lparam & 0xFFFF) as i16 as f32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseMove(
+                blitz_traits::events::BlitzMouseButtonEvent {
+                    x, y,
+                    button: blitz_traits::events::MouseEventButton::Main,
+                    buttons: blitz_traits::events::MouseEventButtons::empty(),
+                    mods: keyboard_types::Modifiers::empty(),
+                },
+            ));
+            0
+        }
+        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+            let x = (lparam & 0xFFFF) as i16 as f32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let button = match msg {
+                WM_LBUTTONDOWN => blitz_traits::events::MouseEventButton::Main,
+                WM_RBUTTONDOWN => blitz_traits::events::MouseEventButton::Secondary,
+                WM_MBUTTONDOWN => blitz_traits::events::MouseEventButton::Auxiliary,
+                _ => blitz_traits::events::MouseEventButton::Main,
+            };
+            // Capture mouse for drag support
+            unsafe { swell().SetCapture(hwnd); }
+            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseDown(
+                blitz_traits::events::BlitzMouseButtonEvent {
+                    x, y, button,
+                    buttons: blitz_traits::events::MouseEventButtons::Primary,
+                    mods: keyboard_types::Modifiers::empty(),
+                },
+            ));
+            0
+        }
+        WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP => {
+            let x = (lparam & 0xFFFF) as i16 as f32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            let button = match msg {
+                WM_LBUTTONUP => blitz_traits::events::MouseEventButton::Main,
+                WM_RBUTTONUP => blitz_traits::events::MouseEventButton::Secondary,
+                WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
+                _ => blitz_traits::events::MouseEventButton::Main,
+            };
+            unsafe { swell().ReleaseCapture(); }
+            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseUp(
+                blitz_traits::events::BlitzMouseButtonEvent {
+                    x, y, button,
+                    buttons: blitz_traits::events::MouseEventButtons::empty(),
+                    mods: keyboard_types::Modifiers::empty(),
+                },
+            ));
+            0
+        }
+        WM_MOUSEWHEEL => {
+            let delta = ((wparam >> 16) & 0xFFFF) as i16 as f64 / 120.0;
+            let x = (lparam & 0xFFFF) as i16 as f32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::Wheel(
+                blitz_traits::events::BlitzWheelEvent {
+                    delta: blitz_traits::events::BlitzWheelDelta::Lines(0.0, delta),
+                    x, y,
+                    button: blitz_traits::events::MouseEventButton::Main,
+                    buttons: blitz_traits::events::MouseEventButtons::empty(),
+                    mods: keyboard_types::Modifiers::empty(),
+                },
+            ));
+            0
+        }
+        // ── Keyboard events ─────────────────────────────────────────
+        WM_KEYDOWN | WM_KEYUP => {
+            let key = swell_vk_to_key(wparam as u32);
+            let code = swell_vk_to_code(wparam as u32);
+            let event = blitz_traits::events::BlitzKeyEvent {
+                key,
+                code,
+                modifiers: keyboard_types::Modifiers::empty(),
+                location: keyboard_types::Location::Standard,
+                is_auto_repeating: false,
+                is_composing: false,
+                state: if msg == WM_KEYDOWN {
+                    blitz_traits::events::KeyState::Pressed
+                } else {
+                    blitz_traits::events::KeyState::Released
+                },
+                text: None,
+            };
+            let ui_event = if msg == WM_KEYDOWN {
+                blitz_traits::events::UiEvent::KeyDown(event)
+            } else {
+                blitz_traits::events::UiEvent::KeyUp(event)
+            };
+            forward_mouse_event(hwnd, ui_event);
+            0
+        }
+        WM_CHAR => {
+            // Text input — send as IME commit
+            if let Some(ch) = char::from_u32(wparam as u32) {
+                if !ch.is_control() {
+                    forward_mouse_event(hwnd, blitz_traits::events::UiEvent::Ime(
+                        blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
+                    ));
+                }
+            }
+            0
+        }
+        // ── Docker close button ─────────────────────────────────────
         WM_COMMAND if (wparam & 0xFFFF) as u32 == IDCANCEL => {
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
