@@ -61,6 +61,9 @@ struct LivePanel {
     /// Last polled IsWindowVisible state (to log changes only).
     #[cfg(target_os = "linux")]
     last_hwnd_visible: bool,
+    /// Cached screen position to avoid redundant X11 move calls.
+    #[cfg(target_os = "linux")]
+    last_screen_pos: (i32, i32),
 }
 
 #[cfg(target_os = "linux")]
@@ -441,6 +444,8 @@ pub fn register_panel(
         init_attempts: 0,
         #[cfg(target_os = "linux")]
         last_hwnd_visible: false,
+        #[cfg(target_os = "linux")]
+        last_screen_pos: (0, 0),
     };
 
     PANELS.with(|panels| { panels.borrow_mut().insert(id, panel); });
@@ -546,23 +551,47 @@ pub fn update_panels() {
                     );
                     panel.last_hwnd_visible = hwnd_visible;
                 }
+
+                // Sync X11 child visibility with SWELL HWND
                 if panel.x11_child_xid != 0 {
                     if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                        if hwnd_visible {
-                            unsafe {
+                        unsafe {
+                            if hwnd_visible {
                                 (xlib.XMapWindow)(display, panel.x11_child_xid);
-                            }
-                        } else {
-                            unsafe {
+                            } else {
                                 (xlib.XUnmapWindow)(display, panel.x11_child_xid);
                             }
                         }
                     }
                 }
+
+                // Detect dock parent change (undocking, moving between dockers).
+                // The parent GDK XID changes when REAPER re-parents our HWND.
+                if hwnd_visible && panel.x11_child_xid != 0 {
+                    let current_parent = gdk::extract_xid(panel.hwnd, swell);
+                    if current_parent != 0 && current_parent != panel.x11_parent_xid {
+                        tracing::info!(
+                            panel = panel.config.id,
+                            old = panel.x11_parent_xid,
+                            new = current_parent,
+                            "Dock parent changed — recreating render surface"
+                        );
+                        panel.view = None;
+                        if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+                            unsafe {
+                                (xlib.XDestroyWindow)(display, panel.x11_child_xid);
+                                (xlib.XFlush)(display);
+                            }
+                        }
+                        panel.x11_child_xid = 0;
+                        panel.x11_parent_xid = 0;
+                        panel.init_attempts = 0;
+                    }
+                }
             }
 
             if !hwnd_visible {
-                continue; // Skip rendering when hidden (tab inactive, dock closed)
+                continue;
             }
 
             // Deferred EmbeddedView init (max 30 retries ≈ 1 second)
@@ -583,15 +612,22 @@ pub fn update_panels() {
                         #[cfg(target_os = "linux")]
                         resize_x11_child(panel.x11_child_xid, w, h);
                     }
-                    // Reposition X11 child to track dock panel movement
+
+                    // Only reposition X11 child when screen position changed
                     #[cfg(target_os = "linux")]
                     if panel.x11_child_xid != 0 && panel.x11_parent_xid != 0 {
-                        reposition_x11_child_to_panel(
-                            panel.hwnd, panel.x11_child_xid,
-                            panel.x11_parent_xid, swell,
-                        );
+                        let mut win_rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                        unsafe { swell.GetWindowRect(panel.hwnd, &mut win_rect); }
+                        let pos = (win_rect.left, win_rect.top);
+                        if pos != panel.last_screen_pos {
+                            panel.last_screen_pos = pos;
+                            reposition_x11_child_to_panel(
+                                panel.hwnd, panel.x11_child_xid,
+                                panel.x11_parent_xid, swell,
+                            );
+                        }
                     }
-                    view.mark_dirty();
+
                     view.update();
                 }
             }
@@ -883,7 +919,6 @@ fn panel_wndproc_inner(
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
     const WM_DESTROY: u32 = 0x0002;
-    const WM_MOVE: u32 = 0x0003;
     const WM_SIZE: u32 = 0x0005;
     const WM_CLOSE: u32 = 0x0010;
     const WM_SHOWWINDOW: u32 = 0x0018;
@@ -909,39 +944,6 @@ fn panel_wndproc_inner(
                 if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
                     tracing::info!(panel = panel.config.id, "WM_CLOSE");
                     hide_panel_inner(panel);
-                }
-            });
-            0
-        }
-        // Track dock movement — parent GDK window may change
-        WM_MOVE => {
-            #[cfg(target_os = "linux")]
-            PANELS.with(|panels| {
-                let mut panels = panels.borrow_mut();
-                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
-                    // Re-lookup parent XID in case panel moved to a different docker
-                    let new_parent = gdk::extract_xid(panel.hwnd, swell());
-                    if new_parent != 0 && new_parent != panel.x11_parent_xid {
-                        tracing::info!(
-                            panel = panel.config.id,
-                            old = panel.x11_parent_xid,
-                            new = new_parent,
-                            "Dock parent changed — recreating render surface"
-                        );
-                        // Destroy old X11 child and view, they'll be recreated
-                        panel.view = None;
-                        if panel.x11_child_xid != 0 {
-                            if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                                unsafe {
-                                    (xlib.XDestroyWindow)(display, panel.x11_child_xid);
-                                    (xlib.XFlush)(display);
-                                }
-                            }
-                            panel.x11_child_xid = 0;
-                        }
-                        panel.x11_parent_xid = 0;
-                        panel.init_attempts = 0;
-                    }
                 }
             });
             0
