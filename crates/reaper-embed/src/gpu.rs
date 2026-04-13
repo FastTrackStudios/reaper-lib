@@ -130,10 +130,12 @@ impl GpuState {
             }))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
+        // Prefer non-sRGB format: Vello outputs sRGB values into Rgba8Unorm,
+        // so using an sRGB surface would double-apply gamma correction.
         let surface_format = surface_caps
             .formats
             .iter()
-            .find(|f| f.is_srgb())
+            .find(|f| !f.is_srgb())
             .copied()
             .unwrap_or(surface_caps.formats[0]);
 
@@ -151,10 +153,12 @@ impl GpuState {
             .copied()
             .unwrap_or(surface_caps.alpha_modes[0]);
 
-        tracing::debug!(
+        tracing::info!(
+            ?surface_format,
             ?alpha_mode,
-            available = ?surface_caps.alpha_modes,
-            "Surface alpha mode"
+            available_formats = ?surface_caps.formats,
+            available_alpha = ?surface_caps.alpha_modes,
+            "GPU surface config"
         );
 
         let surface_config = SurfaceConfiguration {

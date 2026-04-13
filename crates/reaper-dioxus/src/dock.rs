@@ -304,7 +304,7 @@ fn create_x11_render_child(
     let mut attrs = unsafe { std::mem::zeroed::<x11_dl::xlib::XSetWindowAttributes>() };
     attrs.colormap = colormap;
     attrs.border_pixel = 0;
-    attrs.background_pixel = 0x121212;
+    attrs.background_pixel = 0xFF000000; // opaque black
 
     let parent = if parent_xid != 0 { parent_xid } else { root };
 
