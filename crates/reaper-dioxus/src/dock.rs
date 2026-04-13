@@ -552,8 +552,8 @@ pub fn update_panels() {
                     panel.last_hwnd_visible = hwnd_visible;
                 }
 
-                // Sync X11 child visibility with SWELL HWND
-                if panel.x11_child_xid != 0 {
+                // Sync X11 child visibility — only on state change
+                if hwnd_visible != panel.last_hwnd_visible && panel.x11_child_xid != 0 {
                     if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
                         unsafe {
                             if hwnd_visible {
@@ -563,11 +563,29 @@ pub fn update_panels() {
                             }
                         }
                     }
+                    // Mark dirty on show so we get a fresh render
+                    if hwnd_visible {
+                        if let Some(view) = &panel.view {
+                            view.mark_dirty();
+                        }
+                    }
                 }
+            }
 
-                // Detect dock parent change (undocking, moving between dockers).
-                // The parent GDK XID changes when REAPER re-parents our HWND.
-                if hwnd_visible && panel.x11_child_xid != 0 {
+            if !hwnd_visible {
+                continue;
+            }
+
+            // Check position change and dock parent change BEFORE borrowing view
+            #[cfg(target_os = "linux")]
+            if panel.x11_child_xid != 0 && panel.x11_parent_xid != 0 {
+                let mut win_rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                unsafe { swell.GetWindowRect(panel.hwnd, &mut win_rect); }
+                let pos = (win_rect.left, win_rect.top);
+                if pos != panel.last_screen_pos {
+                    panel.last_screen_pos = pos;
+
+                    // Parent changed? (undock/redock) — only check on move
                     let current_parent = gdk::extract_xid(panel.hwnd, swell);
                     if current_parent != 0 && current_parent != panel.x11_parent_xid {
                         tracing::info!(
@@ -586,12 +604,13 @@ pub fn update_panels() {
                         panel.x11_child_xid = 0;
                         panel.x11_parent_xid = 0;
                         panel.init_attempts = 0;
+                    } else {
+                        reposition_x11_child_to_panel(
+                            panel.hwnd, panel.x11_child_xid,
+                            panel.x11_parent_xid, swell,
+                        );
                     }
                 }
-            }
-
-            if !hwnd_visible {
-                continue;
             }
 
             // Deferred EmbeddedView init (max 30 retries ≈ 1 second)
@@ -612,22 +631,6 @@ pub fn update_panels() {
                         #[cfg(target_os = "linux")]
                         resize_x11_child(panel.x11_child_xid, w, h);
                     }
-
-                    // Only reposition X11 child when screen position changed
-                    #[cfg(target_os = "linux")]
-                    if panel.x11_child_xid != 0 && panel.x11_parent_xid != 0 {
-                        let mut win_rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                        unsafe { swell.GetWindowRect(panel.hwnd, &mut win_rect); }
-                        let pos = (win_rect.left, win_rect.top);
-                        if pos != panel.last_screen_pos {
-                            panel.last_screen_pos = pos;
-                            reposition_x11_child_to_panel(
-                                panel.hwnd, panel.x11_child_xid,
-                                panel.x11_parent_xid, swell,
-                            );
-                        }
-                    }
-
                     view.update();
                 }
             }
