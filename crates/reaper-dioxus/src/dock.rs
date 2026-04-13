@@ -699,7 +699,11 @@ fn show_panel_inner(panel: &mut LivePanel) {
     let swell = swell();
     let reaper = reaper();
 
+    // Re-register with docker (removed on hide) so the tab reappears
+    let ident = CString::new(panel.config.id).unwrap();
+    let title = CString::new(panel.config.title).unwrap();
     unsafe {
+        reaper.DockWindowAddEx(panel.hwnd, title.as_ptr(), ident.as_ptr(), false);
         swell.ShowWindow(panel.hwnd, raw::SW_SHOW as c_int);
         reaper.DockWindowActivate(panel.hwnd);
     }
@@ -708,23 +712,28 @@ fn show_panel_inner(panel: &mut LivePanel) {
     force_view_layout(panel.hwnd);
 
     panel.visible = true;
-    panel.init_attempts = 0; // Reset retry counter for deferred init
+    panel.init_attempts = 0;
 
     // Mark dirty so the view renders on the next tick
     if let Some(view) = &panel.view {
         view.mark_dirty();
     }
 
-    // Auto-save visibility
     save_dock_state();
 }
 
 fn hide_panel_inner(panel: &mut LivePanel) {
     let swell = swell();
-    unsafe { swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int); }
+    let reaper = reaper();
+
+    // Remove from docker so the tab disappears, then hide the HWND.
+    // DockWindowRemove is safe to call even when not docked.
+    unsafe {
+        reaper.DockWindowRemove(panel.hwnd);
+        swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int);
+    }
 
     // Keep EmbeddedView and X11 child alive — just unmap the X11 window.
-    // This avoids the ~500ms wgpu re-init on next show.
     #[cfg(target_os = "linux")]
     {
         if panel.x11_child_xid != 0 {
@@ -738,8 +747,6 @@ fn hide_panel_inner(panel: &mut LivePanel) {
     }
 
     panel.visible = false;
-
-    // Auto-save visibility
     save_dock_state();
 }
 
@@ -809,13 +816,19 @@ fn create_render_surface(panel: &mut LivePanel, swell: &Swell, w: u32, h: u32) -
     }
 
     // Create an X11 child window inside the dock container's GDK window.
-    // This child is repositioned each tick to match the panel's position.
     let (xid, visual_id) = create_x11_render_child(parent_xid, w, h)?;
     panel.x11_child_xid = xid;
     panel.x11_parent_xid = parent_xid;
 
-    // Position the child window at the dock panel's offset within the parent
+    // Position first, then map — avoids flash at (0,0).
+    // Must be mapped BEFORE EmbeddedView::new() so wgpu can create the surface.
     reposition_x11_child_to_panel(panel.hwnd, xid, parent_xid, swell);
+    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+        unsafe {
+            (xlib.XMapWindow)(display, xid);
+            (xlib.XFlush)(display);
+        }
+    }
 
     tracing::info!(xid, parent_xid, visual_id, "Created X11 render child for '{}'", panel.config.id);
 
