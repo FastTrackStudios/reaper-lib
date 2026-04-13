@@ -327,9 +327,28 @@ fn create_x11_render_child(
         return None;
     }
 
-    // Don't map yet — update_panels will map after positioning
-    // to avoid a flash at (0,0).
+    // Make the X11 child input-passthrough using XShape extension.
+    // Set an empty input shape so all pointer/keyboard events pass through
+    // to the SWELL HWND underneath, which delivers WM_* messages to our wndproc.
     unsafe {
+        // ShapeInput = 2, ShapeSet = 0
+        let shape_lib = CString::new("libXext.so.6").unwrap();
+        let shape_handle = libc::dlopen(shape_lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_NOLOAD);
+        if !shape_handle.is_null() {
+            let sym_name = CString::new("XShapeCombineRectangles").unwrap();
+            let sym = libc::dlsym(shape_handle, sym_name.as_ptr());
+            if !sym.is_null() {
+                type XShapeCombineRectanglesFn = unsafe extern "C" fn(
+                    *mut c_void, u64, c_int, c_int, c_int,
+                    *const x11_dl::xlib::XRectangle, c_int, c_int, c_int,
+                ) -> ();
+                let shape_combine: XShapeCombineRectanglesFn = std::mem::transmute(sym);
+                // ShapeInput=2, ShapeSet=0, Unsorted=0
+                shape_combine(display as _, window, 2, 0, 0, std::ptr::null(), 0, 0, 0);
+                tracing::debug!("Set empty XShape input region for render child");
+            }
+            libc::dlclose(shape_handle);
+        }
         (xlib.XFlush)(display);
     }
 
@@ -902,6 +921,24 @@ fn forward_mouse_event(hwnd: raw::HWND, event: blitz_traits::events::UiEvent) {
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+            match &event {
+                blitz_traits::events::UiEvent::MouseMove(e) => {
+                    tracing::trace!(x = e.x, y = e.y, "MouseMove on '{}'", panel.config.id);
+                }
+                blitz_traits::events::UiEvent::MouseDown(e) => {
+                    tracing::info!(x = e.x, y = e.y, "MouseDown on '{}'", panel.config.id);
+                }
+                blitz_traits::events::UiEvent::MouseUp(e) => {
+                    tracing::info!(x = e.x, y = e.y, "MouseUp on '{}'", panel.config.id);
+                }
+                blitz_traits::events::UiEvent::KeyDown(e) => {
+                    tracing::info!(key = ?e.key, "KeyDown on '{}'", panel.config.id);
+                }
+                blitz_traits::events::UiEvent::Ime(e) => {
+                    tracing::info!(ime = ?e, "IME on '{}'", panel.config.id);
+                }
+                _ => {}
+            }
             if let Some(view) = &mut panel.view {
                 view.handle_event(event);
             }
