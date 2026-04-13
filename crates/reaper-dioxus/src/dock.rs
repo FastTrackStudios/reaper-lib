@@ -710,6 +710,11 @@ fn show_panel_inner(panel: &mut LivePanel) {
     panel.visible = true;
     panel.init_attempts = 0; // Reset retry counter for deferred init
 
+    // Mark dirty so the view renders on the next tick
+    if let Some(view) = &panel.view {
+        view.mark_dirty();
+    }
+
     // Auto-save visibility
     save_dock_state();
 }
@@ -771,6 +776,7 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
     let contexts = std::mem::take(&mut panel.contexts);
     match EmbeddedView::new(panel.config.app, &surface, w, h, contexts) {
         Ok(view) => {
+            view.mark_dirty(); // Ensure first frame renders
             panel.view = Some(view);
             tracing::info!("Created EmbeddedView for panel '{}'", panel.config.id);
             // Write ExtState so tests can verify the view was created
