@@ -58,6 +58,9 @@ struct LivePanel {
     x11_parent_xid: u64,
     /// Track failed init attempts to avoid infinite retry spam.
     init_attempts: u32,
+    /// Last polled IsWindowVisible state (to log changes only).
+    #[cfg(target_os = "linux")]
+    last_hwnd_visible: bool,
 }
 
 #[cfg(target_os = "linux")]
@@ -436,6 +439,8 @@ pub fn register_panel(
         #[cfg(target_os = "linux")]
         x11_parent_xid: 0,
         init_attempts: 0,
+        #[cfg(target_os = "linux")]
+        last_hwnd_visible: false,
     };
 
     PANELS.with(|panels| { panels.borrow_mut().insert(id, panel); });
@@ -533,6 +538,14 @@ pub fn update_panels() {
 
             #[cfg(target_os = "linux")]
             {
+                if hwnd_visible != panel.last_hwnd_visible {
+                    tracing::info!(
+                        panel = panel.config.id,
+                        hwnd_visible,
+                        "IsWindowVisible changed"
+                    );
+                    panel.last_hwnd_visible = hwnd_visible;
+                }
                 if panel.x11_child_xid != 0 {
                     if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
                         if hwnd_visible {
@@ -877,8 +890,11 @@ fn panel_wndproc_inner(
     const IDCANCEL: u32 = 2;
 
     match msg {
-        // Docker close button sends WM_COMMAND with IDCANCEL
+        // Docker close button sends WM_COMMAND with IDCANCEL.
+        // Remove from docker and hide (like ReaImGui).
         WM_COMMAND if (wparam & 0xFFFF) as u32 == IDCANCEL => {
+            let reaper = reaper();
+            unsafe { reaper.DockWindowRemove(hwnd); }
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
@@ -889,6 +905,8 @@ fn panel_wndproc_inner(
             0
         }
         WM_CLOSE => {
+            let reaper = reaper();
+            unsafe { reaper.DockWindowRemove(hwnd); }
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
@@ -918,7 +936,8 @@ fn panel_wndproc_inner(
                         }
                     } else {
                         panel.visible = false;
-                        panel.view = None;
+                        // Don't drop view — keep GPU resources for instant re-show.
+                        // Just unmap the X11 child.
                         #[cfg(target_os = "linux")]
                         {
                             if panel.x11_child_xid != 0 {
