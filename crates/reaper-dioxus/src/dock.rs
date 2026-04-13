@@ -1173,7 +1173,8 @@ fn panel_wndproc_inner(
                 WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
-            unsafe { swell().ReleaseCapture(); }
+            // Don't ReleaseCapture — keep focus on our panel for keyboard input.
+            // SWELL will release capture naturally when the mouse leaves.
             forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseUp(
                 blitz_traits::events::BlitzMouseButtonEvent {
                     x, y, button,
