@@ -669,26 +669,17 @@ fn hide_panel_inner(panel: &mut LivePanel) {
     let swell = swell();
     unsafe { swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int); }
 
-    // Release GPU resources while hidden (re-created on next show)
-    panel.view = None;
-    // Clear the embedded_view ExtState flag
-    let reaper = reaper();
-    let section = CString::new(panel.config.id).unwrap();
-    let key = CString::new("embedded_view").unwrap();
-    let val = CString::new("0").unwrap();
-    unsafe { reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true); }
-
-    // Destroy X11 child window while hidden
+    // Keep EmbeddedView and X11 child alive — just unmap the X11 window.
+    // This avoids the ~500ms wgpu re-init on next show.
     #[cfg(target_os = "linux")]
     {
         if panel.x11_child_xid != 0 {
             if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
                 unsafe {
-                    (xlib.XDestroyWindow)(display, panel.x11_child_xid);
+                    (xlib.XUnmapWindow)(display, panel.x11_child_xid);
                     (xlib.XFlush)(display);
                 }
             }
-            panel.x11_child_xid = 0;
         }
     }
 
