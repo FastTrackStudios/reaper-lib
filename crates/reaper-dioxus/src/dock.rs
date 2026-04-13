@@ -882,19 +882,18 @@ fn panel_wndproc_inner(
     wparam: raw::WPARAM,
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
-    const WM_COMMAND: u32 = 0x0111;
-    const WM_CLOSE: u32 = 0x0010;
-    const WM_SIZE: u32 = 0x0005;
-    const WM_SHOWWINDOW: u32 = 0x0018;
     const WM_DESTROY: u32 = 0x0002;
+    const WM_MOVE: u32 = 0x0003;
+    const WM_SIZE: u32 = 0x0005;
+    const WM_CLOSE: u32 = 0x0010;
+    const WM_SHOWWINDOW: u32 = 0x0018;
+    const WM_COMMAND: u32 = 0x0111;
     const IDCANCEL: u32 = 2;
 
     match msg {
         // Docker close button sends WM_COMMAND with IDCANCEL.
-        // Remove from docker and hide (like ReaImGui).
+        // Just hide — REAPER manages the dock tab lifecycle.
         WM_COMMAND if (wparam & 0xFFFF) as u32 == IDCANCEL => {
-            let reaper = reaper();
-            unsafe { reaper.DockWindowRemove(hwnd); }
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
@@ -905,13 +904,44 @@ fn panel_wndproc_inner(
             0
         }
         WM_CLOSE => {
-            let reaper = reaper();
-            unsafe { reaper.DockWindowRemove(hwnd); }
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
                     tracing::info!(panel = panel.config.id, "WM_CLOSE");
                     hide_panel_inner(panel);
+                }
+            });
+            0
+        }
+        // Track dock movement — parent GDK window may change
+        WM_MOVE => {
+            #[cfg(target_os = "linux")]
+            PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+                    // Re-lookup parent XID in case panel moved to a different docker
+                    let new_parent = gdk::extract_xid(panel.hwnd, swell());
+                    if new_parent != 0 && new_parent != panel.x11_parent_xid {
+                        tracing::info!(
+                            panel = panel.config.id,
+                            old = panel.x11_parent_xid,
+                            new = new_parent,
+                            "Dock parent changed — recreating render surface"
+                        );
+                        // Destroy old X11 child and view, they'll be recreated
+                        panel.view = None;
+                        if panel.x11_child_xid != 0 {
+                            if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+                                unsafe {
+                                    (xlib.XDestroyWindow)(display, panel.x11_child_xid);
+                                    (xlib.XFlush)(display);
+                                }
+                            }
+                            panel.x11_child_xid = 0;
+                        }
+                        panel.x11_parent_xid = 0;
+                        panel.init_attempts = 0;
+                    }
                 }
             });
             0
@@ -956,6 +986,9 @@ fn panel_wndproc_inner(
             0
         }
         WM_DESTROY => {
+            // Announce to REAPER the window is no longer valid
+            let reaper = reaper();
+            unsafe { reaper.DockWindowRemove(hwnd); }
             PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
                 panels.retain(|_, p| p.hwnd != hwnd);
