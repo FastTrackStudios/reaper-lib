@@ -99,6 +99,50 @@ static SWELL_API: std::sync::OnceLock<&'static Swell> = std::sync::OnceLock::new
 pub fn init(reaper: &'static Reaper, swell: &'static Swell) {
     let _ = REAPER_API.set(reaper);
     let _ = SWELL_API.set(swell);
+
+    // Register an accelerator that passes keyboard events to our panels
+    // when they have focus. Without this, REAPER eats all key presses
+    // as global shortcuts before they reach our wndproc.
+    let handler = Box::new(DockPanelAccelHandler);
+    let high_reaper = reaper_high::Reaper::get();
+    let mut session = high_reaper.medium_session();
+    match session.plugin_register_add_accelerator_register(
+        handler,
+        reaper_medium::AcceleratorPosition::Front,
+    ) {
+        Ok(_handle) => {
+            std::mem::forget(_handle); // Lives for process lifetime
+            tracing::info!("Dock panel accelerator registered");
+        }
+        Err(e) => {
+            tracing::error!("Failed to register dock panel accelerator: {e}");
+        }
+    }
+}
+
+/// Accelerator handler that passes keyboard events to dock panels
+/// when they have focus, preventing REAPER from consuming them.
+struct DockPanelAccelHandler;
+
+impl reaper_medium::TranslateAccel for DockPanelAccelHandler {
+    fn call(&mut self, args: reaper_medium::TranslateAccelArgs) -> reaper_medium::TranslateAccelResult {
+        let msg_hwnd = args.msg.raw().hwnd;
+
+        // Check if the message target is one of our panel HWNDs
+        let is_our_panel = PANELS.with(|panels| {
+            let panels = panels.borrow();
+            panels.values().any(|p| {
+                p.hwnd == msg_hwnd || (unsafe { Swell::get().IsChild(p.hwnd, msg_hwnd) } != 0)
+            })
+        });
+
+        if is_our_panel {
+            // Tell REAPER to pass the key to our window instead of processing it
+            reaper_medium::TranslateAccelResult::PassOnToWindow
+        } else {
+            reaper_medium::TranslateAccelResult::NotOurWindow
+        }
+    }
 }
 
 fn reaper() -> &'static Reaper {

@@ -10,8 +10,10 @@ reaper-embed = { path = "../reaper-embed" }
 # DAW module system (for PanelDef type)
 daw.workspace = true
 
-# REAPER API access (low-level for docking, SWELL window management)
+# REAPER API access
 reaper-low.workspace = true
+reaper-medium.workspace = true
+reaper-high.workspace = true
 
 # Dioxus-native with blitz rendering
 dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
