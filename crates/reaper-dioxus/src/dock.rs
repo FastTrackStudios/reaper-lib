@@ -321,8 +321,9 @@ fn create_x11_render_child(
         return None;
     }
 
+    // Don't map yet — update_panels will map after positioning
+    // to avoid a flash at (0,0).
     unsafe {
-        (xlib.XMapWindow)(display, window);
         (xlib.XFlush)(display);
     }
 
@@ -524,6 +525,31 @@ pub fn update_panels() {
         for panel in panels.values_mut() {
             if !panel.visible {
                 continue;
+            }
+
+            // Poll SWELL visibility — IsWindowVisible returns false when
+            // docked behind another tab (same as ReaImGui's approach).
+            let hwnd_visible = unsafe { swell.IsWindowVisible(panel.hwnd) };
+
+            #[cfg(target_os = "linux")]
+            {
+                if panel.x11_child_xid != 0 {
+                    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
+                        if hwnd_visible {
+                            unsafe {
+                                (xlib.XMapWindow)(display, panel.x11_child_xid);
+                            }
+                        } else {
+                            unsafe {
+                                (xlib.XUnmapWindow)(display, panel.x11_child_xid);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if !hwnd_visible {
+                continue; // Skip rendering when hidden (tab inactive, dock closed)
             }
 
             // Deferred EmbeddedView init (max 30 retries ≈ 1 second)
@@ -852,11 +878,35 @@ fn panel_wndproc_inner(
     wparam: raw::WPARAM,
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
+    const WM_COMMAND: u32 = 0x0111;
+    const WM_CLOSE: u32 = 0x0010;
     const WM_SIZE: u32 = 0x0005;
     const WM_SHOWWINDOW: u32 = 0x0018;
     const WM_DESTROY: u32 = 0x0002;
+    const IDCANCEL: u32 = 2;
 
     match msg {
+        // Docker close button sends WM_COMMAND with IDCANCEL
+        WM_COMMAND if (wparam & 0xFFFF) as u32 == IDCANCEL => {
+            PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+                    tracing::info!(panel = panel.config.id, "Docker close button");
+                    hide_panel_inner(panel);
+                }
+            });
+            0
+        }
+        WM_CLOSE => {
+            PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+                    tracing::info!(panel = panel.config.id, "WM_CLOSE");
+                    hide_panel_inner(panel);
+                }
+            });
+            0
+        }
         WM_SIZE => 0,
         WM_SHOWWINDOW => {
             let showing = wparam != 0;
