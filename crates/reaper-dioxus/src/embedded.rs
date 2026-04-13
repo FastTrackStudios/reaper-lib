@@ -216,6 +216,9 @@ impl EmbeddedView {
     /// Forward a UI event (mouse, keyboard) to the Blitz document.
     pub fn handle_event(&mut self, event: blitz_traits::events::UiEvent) {
         self.doc.handle_ui_event(event);
+        // Poll immediately so Dioxus event handlers fire in the same frame
+        let cx = std::task::Context::from_waker(&self.waker);
+        self.doc.poll(Some(cx));
         self.needs_redraw.store(true, Ordering::Relaxed);
     }
 }
