@@ -650,6 +650,28 @@ pub fn update_panels() {
                         #[cfg(target_os = "linux")]
                         resize_x11_child(panel.x11_child_xid, w, h);
                     }
+
+                    // Poll cursor position and send MouseMove for hit testing
+                    // (SWELL doesn't reliably deliver WM_MOUSEMOVE to docked panels)
+                    let mut cursor = raw::POINT { x: 0, y: 0 };
+                    unsafe {
+                        swell.GetCursorPos(&mut cursor);
+                        swell.ScreenToClient(panel.hwnd, &mut cursor);
+                    }
+                    let cx = cursor.x as f32;
+                    let cy = cursor.y as f32;
+                    if cx >= 0.0 && cy >= 0.0 && cx < w as f32 && cy < h as f32 {
+                        view.handle_event(blitz_traits::events::UiEvent::MouseMove(
+                            blitz_traits::events::BlitzMouseButtonEvent {
+                                x: cx,
+                                y: cy,
+                                button: blitz_traits::events::MouseEventButton::Main,
+                                buttons: blitz_traits::events::MouseEventButtons::empty(),
+                                mods: keyboard_types::Modifiers::empty(),
+                            },
+                        ));
+                    }
+
                     view.update();
                 }
             }
@@ -1084,8 +1106,11 @@ fn panel_wndproc_inner(
                 WM_MBUTTONDOWN => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
-            // Capture mouse for drag support
-            unsafe { swell().SetCapture(hwnd); }
+            // Capture mouse for drag support + take keyboard focus
+            unsafe {
+                swell().SetCapture(hwnd);
+                swell().SetFocus(hwnd);
+            }
             forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseDown(
                 blitz_traits::events::BlitzMouseButtonEvent {
                     x, y, button,
