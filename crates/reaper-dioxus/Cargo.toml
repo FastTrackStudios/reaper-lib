@@ -16,7 +16,9 @@ reaper-medium.workspace = true
 reaper-high.workspace = true
 
 # Dioxus-native with blitz rendering
-dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = ["prelude"] }
+dioxus-native = { git = "https://github.com/DioxusLabs/blitz.git", features = [
+    "prelude", "svg", "system-fonts", "autofocus", "incremental",
+] }
 blitz-dom = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
