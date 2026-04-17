@@ -59,8 +59,15 @@ impl HasDisplayHandle for RawHandleWrapper {
     }
 }
 
-/// GPU state for Vello rendering to a WGPU surface.
-/// GPU state for Vello rendering to a WGPU surface.
+/// GPU state for Vello rendering.
+///
+/// Supports two modes:
+/// - **Surface mode** (default): direct wgpu present to a window surface.
+///   Zero-copy, GPU-only path.
+/// - **Offscreen mode**: renders to a BGRA8 texture whose bits can be copied
+///   back to CPU via [`GpuState::read_pixels`]. Used on Linux docked panels
+///   where SWELL owns the HWND and we must blit via WM_PAINT +
+///   `StretchBltFromMem` (matches reaimgui's gdk_opengl.cpp:86-260).
 ///
 /// Field order matters: Rust drops fields top-to-bottom. Surface and textures
 /// must be dropped before Device to avoid wgpu validation errors.
@@ -69,9 +76,16 @@ pub struct GpuState {
     pub vello_renderer: VelloRenderer,
     intermediate_texture: wgpu::Texture,
     texture_blitter: TextureBlitter,
+    /// BGRA8 present target for offscreen mode; None in surface mode.
+    offscreen_target: Option<wgpu::Texture>,
+    /// Staging buffer for GPU→CPU readback in offscreen mode; None in surface mode.
+    readback_buffer: Option<wgpu::Buffer>,
+    /// Padded bytes-per-row for the readback buffer (wgpu requires 256-byte alignment).
+    readback_row_pitch: u32,
     pub surface_config: SurfaceConfiguration,
+    /// Present surface; None in offscreen mode.
     // Surface dropped before device (wgpu requirement)
-    pub surface: Surface<'static>,
+    pub surface: Option<Surface<'static>>,
     // Core GPU handles (dropped last)
     pub queue: Queue,
     pub device: Device,
@@ -190,31 +204,127 @@ impl GpuState {
         Ok(Self {
             device,
             queue,
-            surface,
+            surface: Some(surface),
             surface_config,
             vello_renderer,
             intermediate_texture,
             texture_blitter,
+            offscreen_target: None,
+            readback_buffer: None,
+            readback_row_pitch: 0,
             adapter,
         })
     }
 
-    /// Resize the surface.
+    /// Create a GPU state that renders offscreen (no window surface).
+    ///
+    /// The caller reads back rendered pixels via [`read_pixels`] and is
+    /// responsible for blitting them to a window (e.g., via SWELL
+    /// `StretchBltFromMem` under `WM_PAINT`). Output format is BGRA8 to
+    /// match LICE's pixel layout on Linux/macOS SWELL.
+    pub fn new_offscreen(width: u32, height: u32) -> Result<Self, GpuError> {
+        let instance = Instance::new(&wgpu::InstanceDescriptor {
+            backends: wgpu::Backends::from_env().unwrap_or_default(),
+            flags: wgpu::InstanceFlags::from_build_config().with_env(),
+            backend_options: wgpu::BackendOptions::from_env_or_default(),
+            ..Default::default()
+        });
+
+        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+            power_preference: wgpu::PowerPreference::HighPerformance,
+            compatible_surface: None,
+            force_fallback_adapter: false,
+        }))?;
+
+        let features = adapter.features() & Features::empty();
+        let limits = adapter.limits();
+
+        let (device, queue) =
+            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+                label: Some("reaper-embed-offscreen"),
+                required_features: features,
+                required_limits: limits,
+                memory_hints: MemoryHints::Performance,
+                trace: wgpu::Trace::Off,
+            }))?;
+
+        let present_format = TextureFormat::Bgra8Unorm;
+        let vello_renderer = VelloRenderer::new(
+            &device,
+            RendererOptions {
+                use_cpu: false,
+                antialiasing_support: AaSupport::area_only(),
+                num_init_threads: std::num::NonZeroUsize::new(1),
+                pipeline_cache: None,
+            },
+        )?;
+
+        let width = width.max(1);
+        let height = height.max(1);
+        let intermediate_texture = create_intermediate_texture(&device, width, height);
+        let texture_blitter = TextureBlitter::new(&device, present_format);
+        let (offscreen_target, readback_buffer, row_pitch) =
+            create_offscreen_resources(&device, width, height, present_format);
+
+        // Surface config shape is preserved so shared code can read width/height.
+        let surface_config = SurfaceConfiguration {
+            usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_DST,
+            format: present_format,
+            width,
+            height,
+            present_mode: wgpu::PresentMode::AutoVsync,
+            desired_maximum_frame_latency: 2,
+            alpha_mode: wgpu::CompositeAlphaMode::Auto,
+            view_formats: vec![],
+        };
+
+        tracing::info!(width, height, "Offscreen GPU state created");
+
+        Ok(Self {
+            device,
+            queue,
+            surface: None,
+            surface_config,
+            vello_renderer,
+            intermediate_texture,
+            texture_blitter,
+            offscreen_target: Some(offscreen_target),
+            readback_buffer: Some(readback_buffer),
+            readback_row_pitch: row_pitch,
+            adapter,
+        })
+    }
+
+    /// Resize the present target (surface or offscreen).
     pub fn resize(&mut self, width: u32, height: u32) {
         let width = width.max(1);
         let height = height.max(1);
 
-        if self.surface_config.width != width || self.surface_config.height != height {
-            self.surface_config.width = width;
-            self.surface_config.height = height;
-            self.surface.configure(&self.device, &self.surface_config);
-            self.intermediate_texture = create_intermediate_texture(&self.device, width, height);
+        if self.surface_config.width == width && self.surface_config.height == height {
+            return;
+        }
+        self.surface_config.width = width;
+        self.surface_config.height = height;
+        self.intermediate_texture = create_intermediate_texture(&self.device, width, height);
+
+        if let Some(surface) = &self.surface {
+            surface.configure(&self.device, &self.surface_config);
+        }
+        if self.offscreen_target.is_some() {
+            let (tex, buf, row_pitch) = create_offscreen_resources(
+                &self.device, width, height, self.surface_config.format,
+            );
+            self.offscreen_target = Some(tex);
+            self.readback_buffer = Some(buf);
+            self.readback_row_pitch = row_pitch;
         }
     }
 
-    /// Render a Vello scene to the surface.
+    /// Render a Vello scene to the surface (panics in offscreen mode — use
+    /// [`render_offscreen`] instead).
     pub fn render(&mut self, scene: &Scene) -> Result<(), GpuError> {
-        let surface_texture = self.surface.get_current_texture()?;
+        let surface = self.surface.as_ref().expect("render() requires surface mode; use render_offscreen");
+        let surface_texture = surface.get_current_texture()?;
 
         let intermediate_view = self
             .intermediate_texture
@@ -248,9 +358,142 @@ impl GpuState {
         Ok(())
     }
 
+    /// Render a Vello scene to the offscreen BGRA8 target (panics in surface mode).
+    ///
+    /// After this returns, [`read_pixels`] can be used to copy the rendered
+    /// bytes back to a CPU buffer suitable for `StretchBltFromMem`.
+    pub fn render_offscreen(&mut self, scene: &Scene) -> Result<(), GpuError> {
+        let target = self.offscreen_target.as_ref()
+            .expect("render_offscreen() requires offscreen mode; use render");
+
+        let intermediate_view = self
+            .intermediate_texture
+            .create_view(&wgpu::TextureViewDescriptor::default());
+
+        let render_params = RenderParams {
+            base_color: vello::peniko::Color::TRANSPARENT,
+            width: self.surface_config.width,
+            height: self.surface_config.height,
+            antialiasing_method: vello::AaConfig::Area,
+        };
+
+        // Render Vello scene → intermediate Rgba8Unorm texture.
+        self.vello_renderer.render_to_texture(
+            &self.device,
+            &self.queue,
+            scene,
+            &intermediate_view,
+            &render_params,
+        )?;
+
+        // Blit intermediate → BGRA8 offscreen target (format conversion).
+        let target_view = target.create_view(&wgpu::TextureViewDescriptor::default());
+        self.texture_blitter
+            .blit(&self.device, &self.queue, &intermediate_view, &target_view);
+        Ok(())
+    }
+
+    /// Copy the offscreen target into `out` as tightly-packed BGRA8 rows.
+    ///
+    /// `out` is resized to `width * height * 4` bytes. Blocks until the GPU
+    /// copy completes (synchronous mapping). Returns an error in surface mode.
+    pub fn read_pixels(&self, out: &mut Vec<u8>) -> Result<(), GpuError> {
+        let target = self.offscreen_target.as_ref()
+            .ok_or(GpuError::InvalidWindowHandle)?;
+        let buffer = self.readback_buffer.as_ref()
+            .ok_or(GpuError::InvalidWindowHandle)?;
+
+        let width = self.surface_config.width;
+        let height = self.surface_config.height;
+        let row_pitch = self.readback_row_pitch;
+
+        // Copy texture → padded buffer
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
+            label: Some("Offscreen Readback"),
+        });
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: target,
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer,
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(row_pitch),
+                    rows_per_image: Some(height),
+                },
+            },
+            Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        self.queue.submit(std::iter::once(encoder.finish()));
+
+        // Map and copy the unpadded rows into `out`.
+        let slice = buffer.slice(..);
+        let (tx, rx) = std::sync::mpsc::channel();
+        slice.map_async(wgpu::MapMode::Read, move |res| {
+            let _ = tx.send(res);
+        });
+        self.device.poll(wgpu::PollType::Wait).ok();
+        rx.recv().ok().and_then(|r| r.ok());
+
+        let tight_stride = (width * 4) as usize;
+        out.clear();
+        out.reserve(tight_stride * height as usize);
+        {
+            let mapped = slice.get_mapped_range();
+            for y in 0..height as usize {
+                let start = y * row_pitch as usize;
+                out.extend_from_slice(&mapped[start..start + tight_stride]);
+            }
+        }
+        buffer.unmap();
+        Ok(())
+    }
+
+    /// True if this GpuState was created with `new_offscreen`.
+    pub fn is_offscreen(&self) -> bool {
+        self.surface.is_none()
+    }
+
     pub fn size(&self) -> (u32, u32) {
         (self.surface_config.width, self.surface_config.height)
     }
+}
+
+/// Create the offscreen BGRA8 render target + padded staging buffer for readback.
+fn create_offscreen_resources(
+    device: &Device,
+    width: u32,
+    height: u32,
+    format: TextureFormat,
+) -> (wgpu::Texture, wgpu::Buffer, u32) {
+    // wgpu requires 256-byte-aligned bytes-per-row for texture→buffer copies.
+    let unpadded = width * 4;
+    let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
+    let row_pitch = (unpadded + align - 1) / align * align;
+
+    let target = device.create_texture(&TextureDescriptor {
+        label: Some("Offscreen Present Target"),
+        size: Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: TextureDimension::D2,
+        format,
+        usage: TextureUsages::RENDER_ATTACHMENT | TextureUsages::COPY_SRC,
+        view_formats: &[],
+    });
+
+    let buffer = device.create_buffer(&wgpu::BufferDescriptor {
+        label: Some("Offscreen Readback Buffer"),
+        size: (row_pitch as u64) * (height as u64),
+        usage: wgpu::BufferUsages::MAP_READ | wgpu::BufferUsages::COPY_DST,
+        mapped_at_creation: false,
+    });
+
+    (target, buffer, row_pitch)
 }
 
 fn create_intermediate_texture(device: &Device, width: u32, height: u32) -> wgpu::Texture {
