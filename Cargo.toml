@@ -57,15 +57,15 @@ objc = "0.2.7"
 # FastTrackStudios fork. Bump rev as features land. Keep all crates pinned
 # to the same rev to avoid dependency-graph drift.
 [patch."https://github.com/DioxusLabs/blitz.git"]
-dioxus-native = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-dioxus-native-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
-stylo_taffy = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "d86d9fa9" }
+dioxus-native = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+dioxus-native-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+blitz-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+blitz-html = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+blitz-net = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+blitz-paint = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+blitz-traits = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+blitz-shell = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
+stylo_taffy = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "9cfbd6e0" }
 
 # Anyrender fork (same as FTS-Plugins)
 [patch.crates-io]
