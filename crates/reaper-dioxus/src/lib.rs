@@ -25,6 +25,8 @@
 pub mod dock;
 pub mod embedded;
 pub mod hot_reload;
+#[cfg(target_os = "macos")]
+pub mod macos_input;
 pub mod overlay;
 pub mod service;
 
