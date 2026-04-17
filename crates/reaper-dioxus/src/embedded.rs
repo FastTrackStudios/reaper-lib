@@ -42,6 +42,12 @@ pub struct EmbeddedView {
     scale_factor: f32,
     width: u32,
     height: u32,
+    /// Cached BGRA8 readback bytes (offscreen mode only). Reused across
+    /// WM_PAINT blits so the window can repaint without re-rendering.
+    readback: Vec<u8>,
+    /// True on the frame after a successful offscreen render; the consumer
+    /// uses this to call `InvalidateRect` so SWELL posts a fresh WM_PAINT.
+    needs_blit: bool,
 }
 
 impl EmbeddedView {
@@ -131,6 +137,79 @@ impl EmbeddedView {
             scale_factor,
             width,
             height,
+            readback: Vec::new(),
+            needs_blit: false,
+        })
+    }
+
+    /// Create an embedded view that renders offscreen (no surface).
+    ///
+    /// Used on Linux docked panels where SWELL owns the HWND and we must
+    /// blit CPU bytes via `StretchBltFromMem` under `WM_PAINT`. Matches
+    /// reaimgui's GDK offscreen-GL path (gdk_opengl.cpp:86-260).
+    pub fn new_offscreen(
+        app: fn() -> Element,
+        width: u32,
+        height: u32,
+        contexts: Vec<Box<dyn FnOnce()>>,
+    ) -> Result<Self, GpuError> {
+        let width = width.max(1);
+        let height = height.max(1);
+        let scale_factor = reaper_embed::display_scale_factor() as f32;
+
+        let gpu = GpuState::new_offscreen(width, height)?;
+
+        let (doc_tx, doc_rx) = unbounded();
+        let doc_proxy = Rc::new(DocumentProxy::new(doc_tx));
+
+        let vdom = VirtualDom::new(app);
+        let viewport = Viewport::new(width, height, scale_factor, ColorScheme::Dark);
+
+        let mut doc = DioxusDocument::new(
+            vdom,
+            DocumentConfig {
+                viewport: Some(viewport),
+                ..Default::default()
+            },
+        );
+
+        doc.vdom.in_scope(ScopeId::ROOT, || {
+            provide_context(doc_proxy as Rc<dyn document::Document>);
+            for ctx_fn in contexts {
+                ctx_fn();
+            }
+        });
+
+        doc.initial_build();
+        while let Ok(msg) = doc_rx.try_recv() {
+            match msg {
+                DocumentMessage::CreateHeadElement { name, attributes, contents } => {
+                    doc.create_head_element(&name, &attributes, &contents);
+                }
+            }
+        }
+        doc.inner_mut().resolve(0.0);
+
+        let needs_redraw = Arc::new(AtomicBool::new(true));
+        let waker = futures_util::task::waker(Arc::new(EmbeddedWaker(needs_redraw.clone())));
+
+        let mut hot_reload = HotReloadState::new();
+        hot_reload.connect();
+
+        Ok(Self {
+            doc,
+            doc_message_rx: doc_rx,
+            gpu,
+            scene: Scene::new(),
+            waker,
+            needs_redraw,
+            hot_reload,
+            animation_start: Instant::now(),
+            scale_factor,
+            width,
+            height,
+            readback: Vec::new(),
+            needs_blit: false,
         })
     }
 
@@ -183,9 +262,36 @@ impl EmbeddedView {
             self.height,
         );
 
-        if let Err(e) = self.gpu.render(&self.scene) {
+        if self.gpu.is_offscreen() {
+            if let Err(e) = self.gpu.render_offscreen(&self.scene) {
+                tracing::debug!("Offscreen render error: {e}");
+                return;
+            }
+            if let Err(e) = self.gpu.read_pixels(&mut self.readback) {
+                tracing::debug!("Offscreen readback error: {e}");
+                return;
+            }
+            self.needs_blit = true;
+        } else if let Err(e) = self.gpu.render(&self.scene) {
             tracing::debug!("Embedded view render error: {e}");
         }
+    }
+
+    /// Most-recently-rendered BGRA8 pixels (offscreen mode). Returns `None`
+    /// when in surface mode or no render has happened yet.
+    pub fn bgra_pixels(&self) -> Option<&[u8]> {
+        if self.gpu.is_offscreen() && !self.readback.is_empty() {
+            Some(&self.readback)
+        } else {
+            None
+        }
+    }
+
+    /// Returns true if a fresh offscreen frame is waiting to be blitted,
+    /// and clears the flag. The consumer should call `InvalidateRect(hwnd, null, FALSE)`
+    /// so SWELL posts a `WM_PAINT` that in turn calls `bgra_pixels` + `StretchBltFromMem`.
+    pub fn take_needs_blit(&mut self) -> bool {
+        std::mem::take(&mut self.needs_blit)
     }
 
     /// Mark the view as needing a redraw on the next update.
@@ -220,6 +326,26 @@ impl EmbeddedView {
         let cx = std::task::Context::from_waker(&self.waker);
         self.doc.poll(Some(cx));
         self.needs_redraw.store(true, Ordering::Relaxed);
+    }
+
+    /// Returns true if the currently focused node is a text-editable element
+    /// (`<input type=text>`, `<textarea>`, contenteditable, etc.).
+    ///
+    /// Used by the REAPER `hwnd_info` hook to tell REAPER to pass typed
+    /// characters through to our panel instead of processing them as global
+    /// action shortcuts. Matches reaimgui's InTextField behavior (window.cpp:395-409).
+    pub fn focused_is_text_input(&self) -> bool {
+        let inner = self.doc.inner();
+        let Some(node_id) = inner.get_focussed_node_id() else {
+            return false;
+        };
+        let Some(node) = inner.get_node(node_id) else {
+            return false;
+        };
+        let Some(element) = node.element_data() else {
+            return false;
+        };
+        element.text_input_data().is_some()
     }
 }
 

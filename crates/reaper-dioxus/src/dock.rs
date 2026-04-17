@@ -9,6 +9,7 @@
 //! render surface, reparented into the dock panel's X11 hierarchy.
 
 use dioxus_native::prelude::*;
+#[cfg(not(target_os = "linux"))]
 use raw_window_handle::{
     DisplayHandle, HandleError, HasDisplayHandle, HasWindowHandle, RawDisplayHandle,
     RawWindowHandle, WindowHandle,
@@ -17,7 +18,9 @@ use reaper_low::raw;
 use reaper_low::{Reaper, Swell};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{CString, c_void};
+use std::ffi::CString;
+#[cfg(not(target_os = "linux"))]
+use std::ffi::c_void;
 use std::os::raw::c_int;
 use std::ptr;
 
@@ -49,39 +52,31 @@ struct LivePanel {
     view: Option<EmbeddedView>,
     visible: bool,
     contexts: Vec<Box<dyn FnOnce()>>,
-    /// X11 child window created for GPU rendering (Linux only).
-    /// Destroyed on panel close to prevent resource leaks.
-    #[cfg(target_os = "linux")]
-    x11_child_xid: u64,
-    /// Parent GDK window XID (Linux only). Used to reposition the child.
-    #[cfg(target_os = "linux")]
-    x11_parent_xid: u64,
     /// Track failed init attempts to avoid infinite retry spam.
     init_attempts: u32,
     /// Last polled IsWindowVisible state (to log changes only).
     #[cfg(target_os = "linux")]
     last_hwnd_visible: bool,
-    /// Cached screen position to avoid redundant X11 move calls.
-    #[cfg(target_os = "linux")]
-    last_screen_pos: (i32, i32),
+    /// Last observed dock ID from `DockIsChildOfDock`. A change indicates
+    /// the user moved the panel between dockers (or undocked it). Used to
+    /// invalidate render state cross-platform (matches reaimgui docker.cpp:527).
+    last_dock_id: i32,
+    /// Retained NSView that forwards keyDown/insertText to the Blitz document
+    /// (macOS only — matches reaimgui InputView).
+    #[cfg(target_os = "macos")]
+    input_view: Option<objc::rc::StrongPtr>,
+    /// Last observed "wants text input" state. When this flips we swap the
+    /// SWELL class name so REAPER <6.29 (which has no hwnd_info hook) still
+    /// suppresses global hotkeys while typing. Matches reaimgui's
+    /// gdk_window.cpp:146-147 / cocoa_window.mm:211-218 class-swap dance.
+    wants_text_input: bool,
 }
 
-#[cfg(target_os = "linux")]
-impl Drop for LivePanel {
-    fn drop(&mut self) {
-        // Destroy X11 child window if we created one
-        if self.x11_child_xid != 0 {
-            if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                unsafe {
-                    (xlib.XDestroyWindow)(display, self.x11_child_xid);
-                    (xlib.XFlush)(display);
-                }
-                tracing::debug!(xid = self.x11_child_xid, "Destroyed X11 child window");
-            }
-        }
-        // EmbeddedView's Drop handles GPU resource cleanup
-    }
-}
+/// REAPER recognises this class name as a text-input-capable window and will
+/// not process global action shortcuts while it has focus. reaimgui uses the
+/// same magic string — it's originally for EEL2/LICE standalone text boxes.
+const TEXT_INPUT_CLASS: &str = "Lua_LICE_gfx_standalone\0";
+const DEFAULT_CLASS: &str = "FTSDioxusPanel\0";
 
 // ---------------------------------------------------------------------------
 // Global registry (thread-local, main thread only)
@@ -111,12 +106,20 @@ pub fn init(reaper: &'static Reaper, swell: &'static Swell) {
         reaper_medium::AcceleratorPosition::Front,
     ) {
         Ok(_handle) => {
-            std::mem::forget(_handle); // Lives for process lifetime
             tracing::info!("Dock panel accelerator registered");
         }
         Err(e) => {
             tracing::error!("Failed to register dock panel accelerator: {e}");
         }
+    }
+
+    // Register an hwnd_info callback (REAPER 6.29+). When the focused element
+    // is a text input, return 1 so REAPER passes typed keys to the HWND
+    // instead of eating them as global action shortcuts. Matches reaimgui
+    // (window.cpp:395-409).
+    match session.plugin_register_add_hwnd_info::<DockPanelHwndInfo>() {
+        Ok(()) => tracing::info!("Dock panel hwnd_info registered"),
+        Err(e) => tracing::warn!("hwnd_info registration failed (REAPER < 6.29?): {e:?}"),
     }
 }
 
@@ -145,6 +148,92 @@ impl reaper_medium::TranslateAccel for DockPanelAccelHandler {
     }
 }
 
+/// Screenset callback — REAPER calls this when saving/loading screensets
+/// and project state so it can track our panel's HWND/dock/focus status.
+///
+/// Actions (from reaper_plugin.h:1321-1346):
+///   0 SCREENSET_ACTION_GETHWND      — return HWND of our window
+///   1 SCREENSET_ACTION_IS_DOCKED    — return 1 if docked
+///   2 SCREENSET_ACTION_SWITCH_DOCK  — toggle dock state
+///   4 SCREENSET_ACTION_LOAD_STATE   — load state from actionParm buffer
+///   8 SCREENSET_ACTION_SAVE_STATE   — write state to actionParm buffer
+unsafe extern "C" fn screenset_callback(
+    action: std::os::raw::c_int,
+    _id: *const std::os::raw::c_char,
+    param: *mut std::os::raw::c_void,
+    _action_parm: *mut std::os::raw::c_void,
+    _action_parm_size: std::os::raw::c_int,
+) -> reaper_low::raw::LRESULT {
+    const SCREENSET_ACTION_GETHWND: i32 = 0;
+    const SCREENSET_ACTION_IS_DOCKED: i32 = 1;
+
+    let hwnd = param as raw::HWND;
+    match action {
+        SCREENSET_ACTION_GETHWND => hwnd as isize,
+        SCREENSET_ACTION_IS_DOCKED => {
+            let mut is_floating = false;
+            let dock_id = unsafe {
+                reaper().DockIsChildOfDock(hwnd, &mut is_floating)
+            };
+            if dock_id >= 0 && !is_floating { 1 } else { 0 }
+        }
+        _ => 0,
+    }
+}
+
+/// Per-HWND query hook — lets REAPER ask whether a given window is currently
+/// editing text. When the focused Dioxus node is a text input, we return 1
+/// so REAPER suppresses global hotkeys and lets the character reach our
+/// wndproc via WM_CHAR.
+struct DockPanelHwndInfo;
+
+impl reaper_medium::HwndInfo for DockPanelHwndInfo {
+    fn call(
+        window: Option<reaper_medium::Hwnd>,
+        info_type: reaper_medium::HwndInfoType,
+        _msg: Option<reaper_medium::AccelMsg>,
+    ) -> i32 {
+        let Some(window) = window else { return 0 };
+        let hwnd_raw = window.as_ptr() as raw::HWND;
+
+        // Walk up SWELL parent chain to find one of our panel HWNDs.
+        let swell = Swell::get();
+        let panel_hwnd = {
+            let mut current = hwnd_raw;
+            let mut found = std::ptr::null_mut();
+            for _ in 0..16 {
+                if current.is_null() { break; }
+                let is_ours = PANELS.with(|panels| {
+                    panels.borrow().values().any(|p| p.hwnd == current)
+                });
+                if is_ours { found = current; break; }
+                let parent = unsafe { swell.GetParent(current) };
+                if parent.is_null() || parent == current { break; }
+                current = parent;
+            }
+            found
+        };
+        if panel_hwnd.is_null() {
+            return 0;
+        }
+
+        match info_type {
+            reaper_medium::HwndInfoType::IsTextField => {
+                let is_text = PANELS.with(|panels| {
+                    panels.borrow().values()
+                        .find(|p| p.hwnd == panel_hwnd)
+                        .and_then(|p| p.view.as_ref())
+                        .map(|v| v.focused_is_text_input())
+                        .unwrap_or(false)
+                });
+                if is_text { 1 } else { -1 }
+            }
+            // Let REAPER process global hotkeys otherwise.
+            _ => 0,
+        }
+    }
+}
+
 fn reaper() -> &'static Reaper {
     REAPER_API.get().expect("dock::init() must be called first")
 }
@@ -164,20 +253,20 @@ fn assert_main_thread() {
 // HWND wrapper for raw-window-handle traits
 // ---------------------------------------------------------------------------
 
+/// Window handle wrapper for the non-Linux wgpu surface path. On Linux we
+/// render offscreen and blit via StretchBltFromMem under WM_PAINT instead —
+/// see [`EmbeddedView::new_offscreen`] and the WM_PAINT handler below.
+#[cfg(not(target_os = "linux"))]
 struct RenderSurface {
-    #[allow(dead_code)]
     hwnd: raw::HWND,
-    #[cfg(target_os = "linux")]
-    xid: u64,
-    #[cfg(target_os = "linux")]
-    visual_id: u32,
 }
 
-// SAFETY: REAPER extensions are single-threaded on the main thread.
-// These handles are only used from the main thread in timer callbacks.
+#[cfg(not(target_os = "linux"))]
 unsafe impl Send for RenderSurface {}
+#[cfg(not(target_os = "linux"))]
 unsafe impl Sync for RenderSurface {}
 
+#[cfg(not(target_os = "linux"))]
 impl HasWindowHandle for RenderSurface {
     fn window_handle(&self) -> Result<WindowHandle<'_>, HandleError> {
         #[cfg(target_os = "macos")]
@@ -189,17 +278,7 @@ impl HasWindowHandle for RenderSurface {
             );
             Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::AppKit(handle)) })
         }
-        #[cfg(target_os = "linux")]
-        {
-            use raw_window_handle::XlibWindowHandle;
-            if self.xid == 0 {
-                return Err(HandleError::Unavailable);
-            }
-            let mut handle = XlibWindowHandle::new(self.xid.try_into().unwrap_or(0));
-            handle.visual_id = self.visual_id.try_into().unwrap_or(0);
-            Ok(unsafe { WindowHandle::borrow_raw(RawWindowHandle::Xlib(handle)) })
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(target_os = "macos"))]
         {
             use raw_window_handle::Win32WindowHandle;
             use std::num::NonZeroIsize;
@@ -211,6 +290,7 @@ impl HasWindowHandle for RenderSurface {
     }
 }
 
+#[cfg(not(target_os = "linux"))]
 impl HasDisplayHandle for RenderSurface {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         #[cfg(target_os = "macos")]
@@ -220,16 +300,7 @@ impl HasDisplayHandle for RenderSurface {
                 DisplayHandle::borrow_raw(RawDisplayHandle::AppKit(AppKitDisplayHandle::new()))
             })
         }
-        #[cfg(target_os = "linux")]
-        {
-            use raw_window_handle::XlibDisplayHandle;
-            let (_, display) = reaper_embed::transparent::x11_display()
-                .ok_or(HandleError::Unavailable)?;
-            use std::ptr::NonNull;
-            let handle = XlibDisplayHandle::new(NonNull::new(display as *mut c_void), 0);
-            Ok(unsafe { DisplayHandle::borrow_raw(RawDisplayHandle::Xlib(handle)) })
-        }
-        #[cfg(not(any(target_os = "macos", target_os = "linux")))]
+        #[cfg(not(target_os = "macos"))]
         {
             use raw_window_handle::WindowsDisplayHandle;
             Ok(unsafe {
@@ -245,218 +316,101 @@ impl HasDisplayHandle for RenderSurface {
 // GDK XID extraction (cached, called once)
 // ---------------------------------------------------------------------------
 
-#[cfg(target_os = "linux")]
-mod gdk {
-    use super::*;
-    use std::sync::OnceLock;
+/// Build and show a dock context menu (reaimgui window.cpp:411-465).
+/// Fires on WM_CONTEXTMENU — on Linux SWELL this is any right-click in the
+/// panel HWND (tab + content). Minimal options: Dock/Undock + Close.
+fn show_dock_context_menu(hwnd: raw::HWND, screen_x: i32, screen_y: i32) {
+    use std::os::raw::c_int;
+    const TPM_RETURNCMD: c_int = 0x0100;
+    const TPM_NONOTIFY: c_int = 0x0080;
+    const CMD_CLOSE: u32 = 1;
+    const CMD_TOGGLE_DOCK: u32 = 2;
 
-    type GdkX11WindowGetXid = unsafe extern "C" fn(*mut c_void) -> u64;
+    let swell = swell();
+    let reaper = reaper();
 
-    /// Cached dlsym result for gdk_x11_window_get_xid.
-    static GDK_GET_XID: OnceLock<Option<GdkX11WindowGetXid>> = OnceLock::new();
-
-    fn get_xid_fn() -> Option<GdkX11WindowGetXid> {
-        *GDK_GET_XID.get_or_init(|| {
-            let lib_names = ["libgdk-3.so.0", "libgdk-3.so"];
-            for lib_name in &lib_names {
-                let c_lib = CString::new(*lib_name).unwrap();
-                let handle =
-                    unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_NOLOAD) };
-                if handle.is_null() {
-                    continue;
-                }
-                let sym_name = CString::new("gdk_x11_window_get_xid").unwrap();
-                let sym = unsafe { libc::dlsym(handle, sym_name.as_ptr()) };
-                unsafe { libc::dlclose(handle) };
-                if !sym.is_null() {
-                    return Some(unsafe { std::mem::transmute(sym) });
-                }
-            }
-            None
-        })
-    }
-
-    /// Try to extract X11 XID from a SWELL HWND via GDK.
-    /// Also walks the SWELL parent chain if the direct HWND has no GdkWindow.
-    pub fn extract_xid(hwnd: raw::HWND, swell: &Swell) -> u64 {
-        if hwnd.is_null() {
-            return 0;
-        }
-
-        let gdk_type = CString::new("GdkWindow").unwrap();
-        let get_xid = match get_xid_fn() {
-            Some(f) => f,
-            None => return 0,
-        };
-
-        // Try the HWND itself, then walk parent chain
-        let mut current = hwnd;
-        for _ in 0..16 {
-            if current.is_null() {
-                break;
-            }
-            let gdk_window = unsafe { swell.SWELL_GetOSWindow(current, gdk_type.as_ptr()) };
-            if !gdk_window.is_null() {
-                let xid = unsafe { get_xid(gdk_window) };
-                if xid != 0 {
-                    return xid;
-                }
-            }
-            let parent = unsafe { swell.GetParent(current) };
-            if parent.is_null() || parent == current {
-                break;
-            }
-            current = parent;
-        }
-
-        0
-    }
-}
-
-// ---------------------------------------------------------------------------
-// X11 child window creation with proper visual
-// ---------------------------------------------------------------------------
-
-#[cfg(target_os = "linux")]
-fn create_x11_render_child(
-    parent_xid: u64,
-    width: u32,
-    height: u32,
-) -> Option<(u64, u32)> {
-    use reaper_embed::transparent::x11_display;
-    use x11_dl::xlib::{AllocNone, CWBackPixel, CWBorderPixel, CWColormap, InputOutput, TrueColor};
-
-    let (xlib, display) = x11_display()?;
-    let screen = unsafe { (xlib.XDefaultScreen)(display) };
-
-    // Find 32-bit ARGB visual (same as TransparentWindow) for wgpu compatibility
-    let mut visual_info = unsafe { std::mem::zeroed::<x11_dl::xlib::XVisualInfo>() };
-    let found = unsafe { (xlib.XMatchVisualInfo)(display, screen, 32, TrueColor, &mut visual_info) };
-    let (visual, depth, visual_id) = if found != 0 {
-        (visual_info.visual, 32, visual_info.visualid as u32)
-    } else {
-        // Fallback to default visual
-        let visual = unsafe { (xlib.XDefaultVisual)(display, screen) };
-        let depth = unsafe { (xlib.XDefaultDepth)(display, screen) };
-        (visual, depth, 0)
+    let is_docked = {
+        let mut is_floating = false;
+        let dock_id = unsafe { reaper.DockIsChildOfDock(hwnd, &mut is_floating) };
+        dock_id >= 0 && !is_floating
     };
 
-    // Create colormap for the visual
-    let root = unsafe { (xlib.XRootWindow)(display, screen) };
-    let colormap = unsafe { (xlib.XCreateColormap)(display, root, visual, AllocNone) };
+    let menu = unsafe { swell.CreatePopupMenu() };
+    if menu.is_null() {
+        return;
+    }
 
-    let mut attrs = unsafe { std::mem::zeroed::<x11_dl::xlib::XSetWindowAttributes>() };
-    attrs.colormap = colormap;
-    attrs.border_pixel = 0;
-    attrs.background_pixel = 0xFF000000; // opaque black
+    unsafe {
+        let toggle_label = if is_docked { "Undock" } else { "Dock in REAPER" };
+        insert_menu_item(menu, CMD_TOGGLE_DOCK, toggle_label);
+        insert_menu_item(menu, CMD_CLOSE, "Close");
+    }
 
-    let parent = if parent_xid != 0 { parent_xid } else { root };
+    // VK_APPS key produces (-1, -1); fall back to window centre.
+    let (px, py) = if screen_x == -1 && screen_y == -1 {
+        let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+        unsafe { swell.GetWindowRect(hwnd, &mut rect); }
+        ((rect.left + rect.right) / 2, (rect.top + rect.bottom) / 2)
+    } else {
+        (screen_x, screen_y)
+    };
 
-    let window = unsafe {
-        (xlib.XCreateWindow)(
-            display,
-            parent,
-            0, 0,
-            width, height,
-            0,
-            depth,
-            InputOutput as u32,
-            visual,
-            CWColormap | CWBorderPixel | CWBackPixel,
-            &mut attrs,
+    let cmd = unsafe {
+        swell.TrackPopupMenu(
+            menu,
+            TPM_RETURNCMD | TPM_NONOTIFY,
+            px, py, 0, hwnd, std::ptr::null(),
         )
     };
+    unsafe { swell.DestroyMenu(menu); }
 
-    if window == 0 {
-        return None;
-    }
-
-    // Make the X11 child input-passthrough using XShape extension.
-    // Set an empty input shape so all pointer/keyboard events pass through
-    // to the SWELL HWND underneath, which delivers WM_* messages to our wndproc.
-    unsafe {
-        // ShapeInput = 2, ShapeSet = 0
-        let shape_lib = CString::new("libXext.so.6").unwrap();
-        let shape_handle = libc::dlopen(shape_lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_NOLOAD);
-        if !shape_handle.is_null() {
-            let sym_name = CString::new("XShapeCombineRectangles").unwrap();
-            let sym = libc::dlsym(shape_handle, sym_name.as_ptr());
-            if !sym.is_null() {
-                type XShapeCombineRectanglesFn = unsafe extern "C" fn(
-                    *mut c_void, u64, c_int, c_int, c_int,
-                    *const x11_dl::xlib::XRectangle, c_int, c_int, c_int,
-                ) -> ();
-                let shape_combine: XShapeCombineRectanglesFn = std::mem::transmute(sym);
-                // ShapeInput=2, ShapeSet=0, Unsorted=0
-                shape_combine(display as _, window, 2, 0, 0, std::ptr::null(), 0, 0, 0);
-                tracing::debug!("Set empty XShape input region for render child");
-            }
-            libc::dlclose(shape_handle);
+    match cmd as u32 {
+        CMD_CLOSE => {
+            PANELS.with(|panels| {
+                let mut panels = panels.borrow_mut();
+                if let Some(panel) = panels.values_mut().find(|p| p.hwnd == hwnd) {
+                    hide_panel_inner(panel);
+                }
+            });
         }
-        (xlib.XFlush)(display);
-    }
-
-    Some((window, visual_id))
-}
-
-/// Reposition and resize the X11 child window to match the panel's client area.
-#[cfg(target_os = "linux")]
-fn resize_x11_child(xid: u64, width: u32, height: u32) {
-    if xid == 0 {
-        return;
-    }
-    // Position is handled separately by reposition_x11_child_to_panel
-    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-        unsafe {
-            (xlib.XResizeWindow)(display, xid, width, height);
-            (xlib.XFlush)(display);
+        CMD_TOGGLE_DOCK => {
+            PANELS.with(|panels| {
+                let panels = panels.borrow();
+                if let Some(panel) = panels.values().find(|p| p.hwnd == hwnd) {
+                    let ident = CString::new(panel.config.id).unwrap();
+                    let title = CString::new(panel.config.title).unwrap();
+                    let new_dock = if is_docked { -1 } else { 0 };
+                    unsafe {
+                        reaper.DockWindowRemove(hwnd);
+                        reaper.Dock_UpdateDockID(ident.as_ptr(), new_dock);
+                        reaper.DockWindowAddEx(hwnd, title.as_ptr(), ident.as_ptr(), true);
+                        reaper.DockWindowActivate(hwnd);
+                    }
+                }
+            });
         }
+        _ => {}
     }
 }
 
-/// Position the X11 child window at the dock panel's screen position
-/// relative to its parent GDK window.
-#[cfg(target_os = "linux")]
-fn reposition_x11_child_to_panel(
-    hwnd: raw::HWND,
-    child_xid: u64,
-    parent_xid: u64,
-    swell: &Swell,
-) {
-    if child_xid == 0 || parent_xid == 0 {
-        return;
-    }
-
-    // Get the panel's screen position via SWELL
-    let mut panel_rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-    unsafe { swell.GetWindowRect(hwnd, &mut panel_rect); }
-
-    let Some((xlib, display)) = reaper_embed::transparent::x11_display() else { return };
-
-    // Translate panel's screen coords to parent-relative coords
-    let root = unsafe { (xlib.XDefaultRootWindow)(display) };
-    let mut dest_x: c_int = 0;
-    let mut dest_y: c_int = 0;
-    let mut dummy_child: u64 = 0;
-    unsafe {
-        (xlib.XTranslateCoordinates)(
-            display,
-            root,
-            parent_xid,
-            panel_rect.left,
-            panel_rect.top,
-            &mut dest_x,
-            &mut dest_y,
-            &mut dummy_child,
-        );
-        (xlib.XMoveWindow)(display, child_xid, dest_x, dest_y);
-    }
-    tracing::trace!(
-        child_xid, parent_xid, dest_x, dest_y,
-        panel_left = panel_rect.left, panel_top = panel_rect.top,
-        "Repositioned X11 child"
-    );
+unsafe fn insert_menu_item(menu: raw::HMENU, id: u32, label: &str) {
+    let swell = Swell::get();
+    let mut label_buf: Vec<u8> = label.as_bytes().to_vec();
+    label_buf.push(0);
+    let mut mi = raw::MENUITEMINFO {
+        fMask: raw::MIIM_TYPE | raw::MIIM_DATA | raw::MIIM_ID,
+        wID: id,
+        dwTypeData: label_buf.as_mut_ptr() as *mut _,
+        ..std::mem::zeroed()
+    };
+    unsafe { swell.InsertMenuItem(menu, -1, 1, &mut mi); }
 }
+
+// Linux X11 reparenting machinery removed — we now render offscreen via
+// `EmbeddedView::new_offscreen` and blit with `StretchBltFromMem` under
+// `WM_PAINT`. See the wndproc's WM_PAINT handler below. This matches
+// reaimgui's gdk_opengl.cpp approach and avoids the many edge cases of
+// tracking GDK parent changes, XShape passthrough, hidden-tab unmapping, etc.
 
 // ---------------------------------------------------------------------------
 // Public API
@@ -481,38 +435,75 @@ pub fn register_panel(
         return;
     }
 
+    // Dock registration order (matches reaimgui docker.cpp:404-420):
+    //   1. Dock_UpdateDockID — sets the dock position for this ident
+    //   2. DockWindowAddEx   — registers the HWND with the docker
+    //   3. DockWindowActivate (on show path) — brings tab to front
+    //
+    // We do NOT use GetConfigWantsDock — REAPER persists dock position per
+    // ident via Dock_UpdateDockID itself (writes reaper.ini on save). Calling
+    // GetConfigWantsDock and then Dock_UpdateDockID races against REAPER's own
+    // save logic. Let Dock_UpdateDockID be the single source of truth.
+    //
+    // First-launch policy: set the default dock position only if the ident
+    // has no prior entry (sentinel in ExtState). On subsequent launches we
+    // skip the update so the user's last choice sticks.
     let ident = CString::new(config.id).unwrap();
-    let saved_dock = unsafe { reaper.GetConfigWantsDock(ident.as_ptr()) };
-    let dock_position = if saved_dock >= 0 { saved_dock } else { config.default_dock_position };
+    let first_launch = {
+        let section = CString::new(config.id).unwrap();
+        let key = CString::new("registered").unwrap();
+        let prior = unsafe { reaper.GetExtState(section.as_ptr(), key.as_ptr()) };
+        prior.is_null() || unsafe { std::ffi::CStr::from_ptr(prior) }.to_bytes().is_empty()
+    };
+    if first_launch && config.default_dock_position >= 0 {
+        unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), config.default_dock_position) };
+    }
+    if first_launch {
+        let section = CString::new(config.id).unwrap();
+        let key = CString::new("registered").unwrap();
+        let val = CString::new("1").unwrap();
+        unsafe { reaper.SetExtState(section.as_ptr(), key.as_ptr(), val.as_ptr(), true); }
+    }
 
     let title_c = CString::new(config.title).unwrap();
     unsafe {
         reaper.DockWindowAddEx(hwnd, title_c.as_ptr(), ident.as_ptr(), config.show_on_first_launch);
     }
 
-    if dock_position >= 0 && saved_dock < 0 {
-        unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), dock_position) };
+    // Register a screenset callback so REAPER can restore dock tab focus
+    // after project load / screenset switch. Matches reaimgui window.cpp:71-73.
+    // The id string must remain valid for the lifetime of the registration —
+    // we leak it (process-lifetime panel IDs).
+    let screenset_id: &'static str = Box::leak(
+        format!("FTSDioxus_{}", config.id).into_boxed_str()
+    );
+    let screenset_id_c = CString::new(screenset_id).unwrap().into_raw();
+    unsafe {
+        reaper.screenset_registerNew(
+            screenset_id_c,
+            Some(screenset_callback),
+            hwnd as *mut std::os::raw::c_void,
+        );
     }
 
+    let default_dock = config.default_dock_position;
     let panel = LivePanel {
         config,
         hwnd,
         view: None,
         visible: false,
         contexts,
-        #[cfg(target_os = "linux")]
-        x11_child_xid: 0,
-        #[cfg(target_os = "linux")]
-        x11_parent_xid: 0,
         init_attempts: 0,
         #[cfg(target_os = "linux")]
         last_hwnd_visible: false,
-        #[cfg(target_os = "linux")]
-        last_screen_pos: (0, 0),
+        last_dock_id: -1,
+        #[cfg(target_os = "macos")]
+        input_view: None,
+        wants_text_input: false,
     };
 
     PANELS.with(|panels| { panels.borrow_mut().insert(id, panel); });
-    tracing::debug!(id, dock_position, "Registered dockable panel");
+    tracing::debug!(id, first_launch, default_dock, "Registered dockable panel");
 }
 
 /// Register a panel from a DawModule PanelDef (service API).
@@ -586,14 +577,38 @@ pub fn is_panel_visible(id: PanelId) -> bool {
     PANELS.with(|panels| panels.borrow().get(id).map_or(false, |p| p.visible))
 }
 
+thread_local! {
+    /// Reentrancy guard — set while `update_panels` is running so that a
+    /// Dioxus event handler calling back into REAPER APIs that re-post into
+    /// the timer cannot recurse into another tick. Matches reaimgui's
+    /// `g_reentrant` / `isDeferLoopBlocked` (resource.cpp:59-72).
+    static UPDATING_PANELS: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
 /// Update all visible panels (call from timer callback ~30Hz).
 pub fn update_panels() {
     #[cfg(debug_assertions)]
     assert_main_thread();
 
+    if UPDATING_PANELS.with(|c| c.replace(true)) {
+        // Re-entered — another update_panels is in progress on this thread.
+        // Drop the tick to avoid borrow-mut-twice on PANELS and runaway recursion.
+        tracing::trace!("update_panels re-entered; skipping");
+        return;
+    }
+    // Scope guard so the flag is cleared even if a panic escapes.
+    struct Guard;
+    impl Drop for Guard {
+        fn drop(&mut self) {
+            UPDATING_PANELS.with(|c| c.set(false));
+        }
+    }
+    let _guard = Guard;
+
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
         let swell = swell();
+        let reaper = reaper();
 
         for panel in panels.values_mut() {
             if !panel.visible {
@@ -601,79 +616,53 @@ pub fn update_panels() {
             }
 
             // Poll SWELL visibility — IsWindowVisible returns false when
-            // docked behind another tab (same as ReaImGui's approach).
+            // docked behind another tab (same as reaimgui window.cpp:234-238).
             let hwnd_visible = unsafe { swell.IsWindowVisible(panel.hwnd) };
 
-            #[cfg(target_os = "linux")]
-            {
-                if hwnd_visible != panel.last_hwnd_visible {
-                    tracing::info!(
-                        panel = panel.config.id,
-                        hwnd_visible,
-                        "IsWindowVisible changed"
-                    );
-                    panel.last_hwnd_visible = hwnd_visible;
+            // Poll dock ID — a change means user moved the panel between
+            // dockers or undocked it. Matches reaimgui docker.cpp:527-529.
+            // On change: invalidate render surface (Linux X11 child, macOS
+            // layout cache, etc.) and force a redraw.
+            let mut is_floating = false;
+            let current_dock_id = unsafe {
+                reaper.DockIsChildOfDock(panel.hwnd, &mut is_floating)
+            };
+            if current_dock_id != panel.last_dock_id {
+                tracing::info!(
+                    panel = panel.config.id,
+                    old = panel.last_dock_id,
+                    new = current_dock_id,
+                    is_floating,
+                    "Dock ID changed"
+                );
+                panel.last_dock_id = current_dock_id;
+                if let Some(view) = &panel.view {
+                    view.mark_dirty();
                 }
+                // Persist the new position
+                let ident = CString::new(panel.config.id).unwrap();
+                if current_dock_id >= 0 {
+                    unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), current_dock_id) };
+                }
+            }
 
-                // Sync X11 child visibility — only on state change
-                if hwnd_visible != panel.last_hwnd_visible && panel.x11_child_xid != 0 {
-                    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                        unsafe {
-                            if hwnd_visible {
-                                (xlib.XMapWindow)(display, panel.x11_child_xid);
-                            } else {
-                                (xlib.XUnmapWindow)(display, panel.x11_child_xid);
-                            }
-                        }
-                    }
-                    // Mark dirty on show so we get a fresh render
-                    if hwnd_visible {
-                        if let Some(view) = &panel.view {
-                            view.mark_dirty();
-                        }
+            #[cfg(target_os = "linux")]
+            if hwnd_visible != panel.last_hwnd_visible {
+                tracing::info!(
+                    panel = panel.config.id,
+                    hwnd_visible,
+                    "IsWindowVisible changed"
+                );
+                panel.last_hwnd_visible = hwnd_visible;
+                if hwnd_visible {
+                    if let Some(view) = &panel.view {
+                        view.mark_dirty();
                     }
                 }
             }
 
             if !hwnd_visible {
                 continue;
-            }
-
-            // Check position change and dock parent change BEFORE borrowing view
-            #[cfg(target_os = "linux")]
-            if panel.x11_child_xid != 0 && panel.x11_parent_xid != 0 {
-                let mut win_rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
-                unsafe { swell.GetWindowRect(panel.hwnd, &mut win_rect); }
-                let pos = (win_rect.left, win_rect.top);
-                if pos != panel.last_screen_pos {
-                    panel.last_screen_pos = pos;
-
-                    // Parent changed? (undock/redock) — only check on move
-                    let current_parent = gdk::extract_xid(panel.hwnd, swell);
-                    if current_parent != 0 && current_parent != panel.x11_parent_xid {
-                        tracing::info!(
-                            panel = panel.config.id,
-                            old = panel.x11_parent_xid,
-                            new = current_parent,
-                            "Dock parent changed — recreating render surface"
-                        );
-                        panel.view = None;
-                        if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                            unsafe {
-                                (xlib.XDestroyWindow)(display, panel.x11_child_xid);
-                                (xlib.XFlush)(display);
-                            }
-                        }
-                        panel.x11_child_xid = 0;
-                        panel.x11_parent_xid = 0;
-                        panel.init_attempts = 0;
-                    } else {
-                        reposition_x11_child_to_panel(
-                            panel.hwnd, panel.x11_child_xid,
-                            panel.x11_parent_xid, swell,
-                        );
-                    }
-                }
             }
 
             // Deferred EmbeddedView init (max 30 retries ≈ 1 second)
@@ -691,32 +680,41 @@ pub fn update_panels() {
                     let (cur_w, cur_h) = view.size();
                     if w != cur_w || h != cur_h {
                         view.resize(w, h);
-                        #[cfg(target_os = "linux")]
-                        resize_x11_child(panel.x11_child_xid, w, h);
                     }
 
-                    // Poll cursor position and send MouseMove for hit testing
-                    // (SWELL doesn't reliably deliver WM_MOUSEMOVE to docked panels)
-                    let mut cursor = raw::POINT { x: 0, y: 0 };
-                    unsafe {
-                        swell.GetCursorPos(&mut cursor);
-                        swell.ScreenToClient(panel.hwnd, &mut cursor);
-                    }
-                    let cx = cursor.x as f32;
-                    let cy = cursor.y as f32;
-                    if cx >= 0.0 && cy >= 0.0 && cx < w as f32 && cy < h as f32 {
-                        view.handle_event(blitz_traits::events::UiEvent::MouseMove(
-                            blitz_traits::events::BlitzMouseButtonEvent {
-                                x: cx,
-                                y: cy,
-                                button: blitz_traits::events::MouseEventButton::Main,
-                                buttons: blitz_traits::events::MouseEventButtons::empty(),
-                                mods: keyboard_types::Modifiers::empty(),
-                            },
-                        ));
+                    // Cursor polling hack removed — WM_MOUSEMOVE reaches our
+                    // wndproc directly now that we render offscreen instead
+                    // of via an X11 child that absorbed events.
+
+                    // Belt-and-braces for REAPER <6.29 (pre-hwnd_info): swap
+                    // the SWELL class to TEXT_INPUT_CLASS while a text field
+                    // has focus so REAPER suppresses global hotkeys. The
+                    // hwnd_info hook already does this on 6.29+; this is
+                    // extra insurance for older versions.
+                    let wants = view.focused_is_text_input();
+                    if wants != panel.wants_text_input {
+                        panel.wants_text_input = wants;
+                        let class = if wants { TEXT_INPUT_CLASS } else { DEFAULT_CLASS };
+                        unsafe {
+                            swell.SWELL_SetClassName(
+                                panel.hwnd,
+                                class.as_ptr() as *const std::os::raw::c_char,
+                            );
+                        }
+                        tracing::trace!(
+                            panel = panel.config.id,
+                            wants,
+                            "SWELL class swap"
+                        );
                     }
 
                     view.update();
+
+                    // In offscreen mode, a completed frame means new pixels
+                    // are ready; tell SWELL to post WM_PAINT so we can blit.
+                    if view.take_needs_blit() {
+                        unsafe { swell.InvalidateRect(panel.hwnd, std::ptr::null(), 0); }
+                    }
                 }
             }
         }
@@ -742,21 +740,36 @@ pub fn unregister_all_panels() {
     });
 }
 
+/// Save the dock state for a single panel. Must be called with the panel
+/// already in hand (avoids re-borrowing PANELS reentrantly).
+///
+/// Historical bug: this used to call `PANELS.with(|p| p.borrow())` while
+/// callers (show/hide) already held `borrow_mut` on PANELS → RefCell panic
+/// → abort inside an extern "C" wndproc → SIGABRT on close.
+fn save_panel_state(panel: &LivePanel) {
+    let reaper = reaper();
+    let id = panel.config.id;
+    let section = CString::new(id).unwrap();
+    let vis_key = CString::new("visible").unwrap();
+    let vis_val = CString::new(if panel.visible { "1" } else { "0" }).unwrap();
+    unsafe { reaper.SetExtState(section.as_ptr(), vis_key.as_ptr(), vis_val.as_ptr(), true); }
+
+    // Persist dock position via REAPER's authoritative API.
+    let mut is_floating = false;
+    let dock_id = unsafe { reaper.DockIsChildOfDock(panel.hwnd, &mut is_floating) };
+    if dock_id >= 0 {
+        let ident = CString::new(id).unwrap();
+        unsafe { reaper.Dock_UpdateDockID(ident.as_ptr(), dock_id) };
+    }
+}
+
+/// Public entry: save state for every registered panel. Takes the PANELS
+/// borrow itself so MUST NOT be called from inside an existing borrow.
 pub fn save_dock_state() {
     PANELS.with(|panels| {
         let panels = panels.borrow();
-        let reaper = reaper();
-        for (id, panel) in panels.iter() {
-            let section = CString::new(*id).unwrap();
-            let vis_key = CString::new("visible").unwrap();
-            let vis_val = CString::new(if panel.visible { "1" } else { "0" }).unwrap();
-            unsafe { reaper.SetExtState(section.as_ptr(), vis_key.as_ptr(), vis_val.as_ptr(), true); }
-
-            let mut is_floating = false;
-            let dock_id = unsafe { reaper.DockIsChildOfDock(panel.hwnd, &mut is_floating) };
-            let dock_key = CString::new("dock_id").unwrap();
-            let dock_val = CString::new(format!("{}", dock_id)).unwrap();
-            unsafe { reaper.SetExtState(section.as_ptr(), dock_key.as_ptr(), dock_val.as_ptr(), true); }
+        for panel in panels.values() {
+            save_panel_state(panel);
         }
     });
 }
@@ -784,15 +797,15 @@ pub fn restore_dock_state() {
 // ---------------------------------------------------------------------------
 
 fn show_panel_inner(panel: &mut LivePanel) {
-    let swell = swell();
     let reaper = reaper();
 
-    // Re-register with docker (removed on hide) so the tab reappears
+    // Re-register with docker (removed on hide) so the tab reappears.
+    // allowShow=true makes REAPER show the window; no separate ShowWindow needed
+    // (matches reaimgui's add-then-activate pattern — window.cpp:209-222).
     let ident = CString::new(panel.config.id).unwrap();
     let title = CString::new(panel.config.title).unwrap();
     unsafe {
-        reaper.DockWindowAddEx(panel.hwnd, title.as_ptr(), ident.as_ptr(), false);
-        swell.ShowWindow(panel.hwnd, raw::SW_SHOW as c_int);
+        reaper.DockWindowAddEx(panel.hwnd, title.as_ptr(), ident.as_ptr(), true);
         reaper.DockWindowActivate(panel.hwnd);
     }
 
@@ -807,7 +820,9 @@ fn show_panel_inner(panel: &mut LivePanel) {
         view.mark_dirty();
     }
 
-    save_dock_state();
+    // Caller holds PANELS borrow — use the per-panel variant to avoid
+    // a reentrant borrow that would RefCell-panic inside extern "C" wndproc.
+    save_panel_state(panel);
 }
 
 fn hide_panel_inner(panel: &mut LivePanel) {
@@ -821,21 +836,9 @@ fn hide_panel_inner(panel: &mut LivePanel) {
         swell.ShowWindow(panel.hwnd, raw::SW_HIDE as c_int);
     }
 
-    // Keep EmbeddedView and X11 child alive — just unmap the X11 window.
-    #[cfg(target_os = "linux")]
-    {
-        if panel.x11_child_xid != 0 {
-            if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                unsafe {
-                    (xlib.XUnmapWindow)(display, panel.x11_child_xid);
-                    (xlib.XFlush)(display);
-                }
-            }
-        }
-    }
-
+    // Keep EmbeddedView alive — just stop rendering until shown again.
     panel.visible = false;
-    save_dock_state();
+    save_panel_state(panel);
 }
 
 fn try_init_embedded_view(panel: &mut LivePanel) {
@@ -856,24 +859,50 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
     let h = (rect.bottom - rect.top).unsigned_abs().max(panel.config.default_height);
     tracing::info!(w, h, "Panel '{}' client rect", panel.config.id);
 
-    // Try to get a render surface
-    let surface = create_render_surface(panel, swell, w, h);
-    let Some(surface) = surface else {
-        if panel.init_attempts >= 30 {
-            tracing::error!(
-                "Failed to create render surface for '{}' after {} attempts",
-                panel.config.id, panel.init_attempts
-            );
-        }
-        return;
+    let contexts = std::mem::take(&mut panel.contexts);
+
+    // On Linux, SWELL docked panels don't own a GDK window we can render
+    // into directly via wgpu — so we render offscreen and blit via
+    // StretchBltFromMem under WM_PAINT. Mirrors reaimgui's approach
+    // (gdk_opengl.cpp:86-260).
+    //
+    // On macOS/Windows, the SWELL HWND is a real native view/window and
+    // wgpu can target it directly.
+    #[cfg(target_os = "linux")]
+    let view_result = EmbeddedView::new_offscreen(panel.config.app, w, h, contexts);
+
+    #[cfg(not(target_os = "linux"))]
+    let view_result = {
+        let surface = create_render_surface(panel, swell, w, h);
+        let Some(surface) = surface else {
+            if panel.init_attempts >= 30 {
+                tracing::error!(
+                    "Failed to create render surface for '{}' after {} attempts",
+                    panel.config.id, panel.init_attempts
+                );
+            }
+            return;
+        };
+        EmbeddedView::new(panel.config.app, &surface, w, h, contexts)
     };
 
-    let contexts = std::mem::take(&mut panel.contexts);
-    match EmbeddedView::new(panel.config.app, &surface, w, h, contexts) {
+    match view_result {
         Ok(view) => {
             view.mark_dirty(); // Ensure first frame renders
             panel.view = Some(view);
             tracing::info!("Created EmbeddedView for panel '{}'", panel.config.id);
+
+            // Attach the macOS InputView so keyDown: / insertText: reach the
+            // Blitz document even when the SWELL HWND isn't firstResponder.
+            #[cfg(target_os = "macos")]
+            {
+                panel.input_view = crate::macos_input::attach_to_panel(panel.hwnd);
+                if panel.input_view.is_some() {
+                    tracing::info!("Attached macOS InputView for panel '{}'", panel.config.id);
+                } else {
+                    tracing::warn!("Failed to attach macOS InputView for '{}'", panel.config.id);
+                }
+            }
             // Write ExtState so tests can verify the view was created
             let reaper = reaper();
             let section = CString::new(panel.config.id).unwrap();
@@ -887,100 +916,22 @@ fn try_init_embedded_view(panel: &mut LivePanel) {
     }
 }
 
-/// Create a RenderSurface for the panel.
-///
-/// On Linux, SWELL dock panels don't get their own GDK window, so we
-/// create an X11 child window inside the nearest ancestor that has a
-/// GDK window (the dock container). The child is positioned and resized
-/// by `update_panels` to match the dock panel's client rect.
-#[cfg(target_os = "linux")]
-fn create_render_surface(panel: &mut LivePanel, swell: &Swell, w: u32, h: u32) -> Option<RenderSurface> {
-    // Find the nearest ancestor GDK window to use as X11 parent
-    let parent_xid = gdk::extract_xid(panel.hwnd, swell);
-    tracing::info!(parent_xid, "GDK XID lookup for panel '{}'", panel.config.id);
-    if parent_xid == 0 {
-        tracing::warn!("No GDK XID found for panel '{}'", panel.config.id);
-        return None;
-    }
-
-    // Create an X11 child window inside the dock container's GDK window.
-    let (xid, visual_id) = create_x11_render_child(parent_xid, w, h)?;
-    panel.x11_child_xid = xid;
-    panel.x11_parent_xid = parent_xid;
-
-    // Position first, then map — avoids flash at (0,0).
-    // Must be mapped BEFORE EmbeddedView::new() so wgpu can create the surface.
-    reposition_x11_child_to_panel(panel.hwnd, xid, parent_xid, swell);
-    if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-        unsafe {
-            (xlib.XMapWindow)(display, xid);
-            (xlib.XFlush)(display);
-        }
-    }
-
-    tracing::info!(xid, parent_xid, visual_id, "Created X11 render child for '{}'", panel.config.id);
-
-    Some(RenderSurface {
-        hwnd: panel.hwnd,
-        xid,
-        visual_id,
-    })
-}
-
 #[cfg(not(target_os = "linux"))]
 fn create_render_surface(panel: &mut LivePanel, _swell: &Swell, _w: u32, _h: u32) -> Option<RenderSurface> {
     Some(RenderSurface { hwnd: panel.hwnd })
 }
 
-/// Walk the SWELL parent chain to find an ancestor with a GDK window (and thus an XID).
-#[cfg(target_os = "linux")]
-fn find_parent_xid(hwnd: raw::HWND, swell: &Swell) -> u64 {
-    let mut current = unsafe { swell.GetParent(hwnd) };
-    let gdk_type = CString::new("GdkWindow").unwrap();
-
-    for _ in 0..16 {
-        if current.is_null() {
-            break;
-        }
-        let gdk_window = unsafe { swell.SWELL_GetOSWindow(current, gdk_type.as_ptr()) };
-        if !gdk_window.is_null() {
-            if let Some(get_xid) = gdk_get_xid_fn() {
-                let xid = unsafe { get_xid(gdk_window) };
-                if xid != 0 {
-                    return xid;
-                }
-            }
-        }
-        let parent = unsafe { swell.GetParent(current) };
-        if parent.is_null() || parent == current {
-            break;
-        }
-        current = parent;
-    }
-    0
-}
-
-#[cfg(target_os = "linux")]
-fn gdk_get_xid_fn() -> Option<unsafe extern "C" fn(*mut c_void) -> u64> {
-    // Use the cached version from the gdk module
-    let lib_names = ["libgdk-3.so.0", "libgdk-3.so"];
-    for lib_name in &lib_names {
-        let c_lib = CString::new(*lib_name).unwrap();
-        let handle = unsafe { libc::dlopen(c_lib.as_ptr(), libc::RTLD_LAZY | libc::RTLD_NOLOAD) };
-        if handle.is_null() { continue; }
-        let sym_name = CString::new("gdk_x11_window_get_xid").unwrap();
-        let sym = unsafe { libc::dlsym(handle, sym_name.as_ptr()) };
-        unsafe { libc::dlclose(handle) };
-        if !sym.is_null() {
-            return Some(unsafe { std::mem::transmute(sym) });
-        }
-    }
-    None
-}
-
 // ---------------------------------------------------------------------------
 // Event forwarding
 // ---------------------------------------------------------------------------
+
+/// Forward a keyboard/IME event from the macOS InputView into the panel's
+/// embedded view. Exposed `pub(crate)` so the InputView NSView subclass
+/// can dispatch events without going through the SWELL wndproc.
+#[cfg(target_os = "macos")]
+pub(crate) fn forward_keyboard_event(hwnd: raw::HWND, event: blitz_traits::events::UiEvent) {
+    forward_mouse_event(hwnd, event)
+}
 
 /// Forward a UI event to the panel's EmbeddedView.
 fn forward_mouse_event(hwnd: raw::HWND, event: blitz_traits::events::UiEvent) {
@@ -1069,9 +1020,11 @@ fn create_panel_window(config: &DockablePanelConfig, swell: &Swell) -> raw::HWND
     let title_c = CString::new(config.title).unwrap();
 
     unsafe {
-        // Magic resid: 0x400000 | flags
-        // bit 0 = resizable (WS_THICKFRAME)
-        let magic_resid = 0x400001usize as *const std::os::raw::c_char;
+        // SWELL magic resid: 0x400000 | ForceNonChild(0x8) | Resizable(0x1) = 0x400009.
+        // ForceNonChild is mandatory — without it the dialog becomes a WS_CHILD of
+        // the calling window's top-level and the docker hosts it awkwardly.
+        // Matches reaimgui (window.cpp:339-343).
+        let magic_resid = 0x400009usize as *const std::os::raw::c_char;
 
         let hwnd = swell.CreateDialogParam(
             ptr::null_mut(),
@@ -1099,7 +1052,7 @@ unsafe extern "C" fn panel_wndproc(
     wparam: raw::WPARAM,
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
-    unsafe { panel_wndproc_inner(hwnd, msg, wparam, lparam) }
+    panel_wndproc_inner(hwnd, msg, wparam, lparam)
 }
 
 fn panel_wndproc_inner(
@@ -1109,9 +1062,13 @@ fn panel_wndproc_inner(
     lparam: raw::LPARAM,
 ) -> raw::LRESULT {
     const WM_DESTROY: u32 = 0x0002;
+    const WM_PAINT: u32 = 0x000F;
     const WM_SIZE: u32 = 0x0005;
     const WM_CLOSE: u32 = 0x0010;
     const WM_SHOWWINDOW: u32 = 0x0018;
+    const WM_CONTEXTMENU: u32 = 0x007B;
+    const WM_GETDLGCODE: u32 = 0x0087;
+    const DLGC_WANTALLKEYS: raw::LRESULT = 0x0004;
     const WM_MOUSEMOVE: u32 = 0x0200;
     const WM_LBUTTONDOWN: u32 = 0x0201;
     const WM_LBUTTONUP: u32 = 0x0202;
@@ -1127,6 +1084,54 @@ fn panel_wndproc_inner(
     const IDCANCEL: u32 = 2;
 
     match msg {
+        // ── Paint (Linux offscreen blit) ────────────────────────────
+        // On Linux, the offscreen renderer writes BGRA8 bytes into the panel's
+        // readback buffer and calls `InvalidateRect` so SWELL posts WM_PAINT.
+        // Here we BeginPaint → StretchBltFromMem → EndPaint. Matches reaimgui's
+        // gdk_opengl.cpp:247-260 blit-under-WM_PAINT pattern.
+        #[cfg(target_os = "linux")]
+        WM_PAINT => {
+            let swell = swell();
+            let mut ps: raw::PAINTSTRUCT = unsafe { std::mem::zeroed() };
+            let hdc = unsafe { swell.BeginPaint(hwnd, &mut ps) };
+            if hdc.is_null() {
+                return 0;
+            }
+
+            // Pull view dims + pixel bytes under PANELS borrow, then blit.
+            let blit_info = PANELS.with(|panels| {
+                let panels = panels.borrow();
+                let panel = panels.values().find(|p| p.hwnd == hwnd)?;
+                let view = panel.view.as_ref()?;
+                let pixels = view.bgra_pixels()?;
+                let (w, h) = view.size();
+                // SAFETY: pixels is borrowed from a thread_local — safe to pass
+                // through as long as the borrow doesn't escape. We use the
+                // pointer during the call, still inside the closure.
+                let ptr = pixels.as_ptr();
+                Some((ptr, w as c_int, h as c_int))
+            });
+
+            if let Some((ptr, w, h)) = blit_info {
+                let mut rect = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+                unsafe { swell.GetClientRect(hwnd, &mut rect); }
+                let cw = rect.right - rect.left;
+                let ch = rect.bottom - rect.top;
+                // `srcspan` is pixels-per-row (LICE_WrapperBitmap m_span, not bytes).
+                // Passing bytes here caused a 4× row-stride overrun → SIGSEGV
+                // inside memmove. Our readback is tightly packed, so span == w.
+                unsafe {
+                    swell.StretchBltFromMem(
+                        hdc, 0, 0, cw, ch,
+                        ptr as *const std::ffi::c_void,
+                        w, h, w,
+                    );
+                }
+            }
+
+            unsafe { swell.EndPaint(hwnd, &mut ps); }
+            0
+        }
         // ── Mouse events ────────────────────────────────────────────
         WM_MOUSEMOVE => {
             let x = (lparam & 0xFFFF) as i16 as f32;
@@ -1141,12 +1146,11 @@ fn panel_wndproc_inner(
             ));
             0
         }
-        WM_LBUTTONDOWN | WM_RBUTTONDOWN | WM_MBUTTONDOWN => {
+        WM_LBUTTONDOWN | WM_MBUTTONDOWN => {
             let x = (lparam & 0xFFFF) as i16 as f32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
             let button = match msg {
                 WM_LBUTTONDOWN => blitz_traits::events::MouseEventButton::Main,
-                WM_RBUTTONDOWN => blitz_traits::events::MouseEventButton::Secondary,
                 WM_MBUTTONDOWN => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
@@ -1164,17 +1168,31 @@ fn panel_wndproc_inner(
             ));
             0
         }
-        WM_LBUTTONUP | WM_RBUTTONUP | WM_MBUTTONUP => {
+        // Right-click: forward to Blitz AND fall through to DefWindowProc so
+        // SWELL/REAPER can synthesise WM_CONTEXTMENU, which the docker uses
+        // to open the dock/undock/options menu on tab right-click.
+        WM_RBUTTONDOWN => {
+            let x = (lparam & 0xFFFF) as i16 as f32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseDown(
+                blitz_traits::events::BlitzMouseButtonEvent {
+                    x, y,
+                    button: blitz_traits::events::MouseEventButton::Secondary,
+                    buttons: blitz_traits::events::MouseEventButtons::Secondary,
+                    mods: keyboard_types::Modifiers::empty(),
+                },
+            ));
+            let swell = swell();
+            unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
+        }
+        WM_LBUTTONUP | WM_MBUTTONUP => {
             let x = (lparam & 0xFFFF) as i16 as f32;
             let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
             let button = match msg {
                 WM_LBUTTONUP => blitz_traits::events::MouseEventButton::Main,
-                WM_RBUTTONUP => blitz_traits::events::MouseEventButton::Secondary,
                 WM_MBUTTONUP => blitz_traits::events::MouseEventButton::Auxiliary,
                 _ => blitz_traits::events::MouseEventButton::Main,
             };
-            // Don't ReleaseCapture — keep focus on our panel for keyboard input.
-            // SWELL will release capture naturally when the mouse leaves.
             forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseUp(
                 blitz_traits::events::BlitzMouseButtonEvent {
                     x, y, button,
@@ -1183,6 +1201,20 @@ fn panel_wndproc_inner(
                 },
             ));
             0
+        }
+        WM_RBUTTONUP => {
+            let x = (lparam & 0xFFFF) as i16 as f32;
+            let y = ((lparam >> 16) & 0xFFFF) as i16 as f32;
+            forward_mouse_event(hwnd, blitz_traits::events::UiEvent::MouseUp(
+                blitz_traits::events::BlitzMouseButtonEvent {
+                    x, y,
+                    button: blitz_traits::events::MouseEventButton::Secondary,
+                    buttons: blitz_traits::events::MouseEventButtons::empty(),
+                    mods: keyboard_types::Modifiers::empty(),
+                },
+            ));
+            let swell = swell();
+            unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
         WM_MOUSEWHEEL => {
             let delta = ((wparam >> 16) & 0xFFFF) as i16 as f64 / 120.0;
@@ -1257,6 +1289,35 @@ fn panel_wndproc_inner(
             });
             0
         }
+        // Tell the dialog manager we want every key — prevents Tab/Enter/Escape
+        // being intercepted by the docker/dialog chain on Win32.
+        // Matches reaimgui win32_window.cpp:396-397.
+        WM_GETDLGCODE => DLGC_WANTALLKEYS,
+        // Right-click → show dock/undock/close menu ONLY when the click is
+        // outside our client area (i.e., on the docker tab / title bar).
+        // Clicks inside the client area are content interactions; we fall
+        // through to DefWindowProc so Blitz/REAPER can handle them.
+        WM_CONTEXTMENU => {
+            let sx = (lparam & 0xFFFF) as i16 as i32;
+            let sy = ((lparam >> 16) & 0xFFFF) as i16 as i32;
+            let swell = swell();
+            let mut pt = raw::POINT { x: sx, y: sy };
+            unsafe { swell.ScreenToClient(hwnd, &mut pt); }
+            let mut client = raw::RECT { left: 0, top: 0, right: 0, bottom: 0 };
+            unsafe { swell.GetClientRect(hwnd, &mut client); }
+            let in_client =
+                pt.x >= client.left && pt.x < client.right
+                && pt.y >= client.top && pt.y < client.bottom;
+            if in_client {
+                // Content right-click — let Blitz/SWELL handle it normally.
+                let swell = swell;
+                unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
+            } else {
+                // Tab / non-client right-click — show our dock menu.
+                show_dock_context_menu(hwnd, sx, sy);
+                0
+            }
+        }
         WM_SIZE => 0,
         WM_SHOWWINDOW => {
             let showing = wparam != 0;
@@ -1266,30 +1327,12 @@ fn panel_wndproc_inner(
                     if showing {
                         panel.visible = true;
                         panel.init_attempts = 0;
-                        #[cfg(target_os = "linux")]
-                        if panel.x11_child_xid != 0 {
-                            if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                                unsafe {
-                                    (xlib.XMapWindow)(display, panel.x11_child_xid);
-                                    (xlib.XFlush)(display);
-                                }
-                            }
+                        if let Some(view) = &panel.view {
+                            view.mark_dirty();
                         }
                     } else {
+                        // Keep the view alive for instant re-show; just stop rendering.
                         panel.visible = false;
-                        // Don't drop view — keep GPU resources for instant re-show.
-                        // Just unmap the X11 child.
-                        #[cfg(target_os = "linux")]
-                        {
-                            if panel.x11_child_xid != 0 {
-                                if let Some((xlib, display)) = reaper_embed::transparent::x11_display() {
-                                    unsafe {
-                                        (xlib.XUnmapWindow)(display, panel.x11_child_xid);
-                                        (xlib.XFlush)(display);
-                                    }
-                                }
-                            }
-                        }
                     }
                     tracing::info!(showing, panel = panel.config.id, "WM_SHOWWINDOW");
                 }
@@ -1297,16 +1340,51 @@ fn panel_wndproc_inner(
             0
         }
         WM_DESTROY => {
-            // Announce to REAPER the window is no longer valid
-            let reaper = reaper();
-            unsafe { reaper.DockWindowRemove(hwnd); }
-            PANELS.with(|panels| {
+            // Order matters: remove the panel from the registry FIRST so any
+            // re-entrant wndproc calls from DockWindowRemove fall through to
+            // DefWindowProc rather than dereferencing a dying LivePanel.
+            // Matches reaimgui's WM_DESTROY sequence (window.cpp:109-121):
+            //   1. screenset_unregisterByParam
+            //   2. clear GWLP_USERDATA (≈ our HashMap::remove)
+            //   3. DockWindowRemove
+            let taken = PANELS.with(|panels| {
                 let mut panels = panels.borrow_mut();
-                panels.retain(|_, p| p.hwnd != hwnd);
+                let id = panels.iter()
+                    .find(|(_, p)| p.hwnd == hwnd)
+                    .map(|(id, _)| *id);
+                id.and_then(|id| panels.remove(id).map(|p| (id, p)))
             });
+            if let Some((_id, mut panel)) = taken {
+                panel.view = None;
+                let reaper = reaper();
+                // Unregister screenset callback before destroying the HWND —
+                // otherwise REAPER may call us back with a dead param.
+                // Matches reaimgui (window.cpp:111).
+                unsafe { reaper.screenset_unregisterByParam(hwnd as *mut std::os::raw::c_void); }
+                unsafe { reaper.DockWindowRemove(hwnd); }
+                // LivePanel::Drop handles X11 child cleanup (Linux).
+                drop(panel);
+            }
             0
         }
         _ => {
+            // Log uncommon messages so we can see what the docker sends when
+            // the user clicks the close X, etc. Cheap filter: skip the noisy
+            // timer/paint/erasebg churn.
+            if msg != 0x000E /*WM_ERASEBKGND*/
+                && msg != 0x0014 /*WM_ERASEBKGND dup*/
+                && msg != 0x002A /*WM_FONTCHANGE*/
+                && msg != 0x0113 /*WM_TIMER*/
+                && msg != 0x0020 /*WM_SETCURSOR*/
+                && msg != 0x0084 /*WM_NCHITTEST*/
+                && msg != 0x0083 /*WM_NCCALCSIZE — fires constantly*/
+                && msg != 0x0085 /*WM_NCPAINT*/
+                && msg != 0x0046 /*WM_WINDOWPOSCHANGING*/
+                && msg != 0x0047 /*WM_WINDOWPOSCHANGED*/
+                && msg != 0x0215 /*WM_CAPTURECHANGED*/
+            {
+                tracing::info!(msg = format!("0x{msg:04X}"), wparam, lparam, "unhandled wnd msg");
+            }
             let swell = swell();
             unsafe { swell.DefWindowProc(hwnd, msg, wparam, lparam) }
         }
