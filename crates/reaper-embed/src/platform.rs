@@ -49,7 +49,9 @@ pub fn main_screen_height() -> f64 {
 #[cfg(target_os = "linux")]
 pub fn main_screen_height() -> f64 {
     use crate::transparent::x11_display;
-    let Some((xlib, display)) = x11_display() else { return 1080.0 };
+    let Some((xlib, display)) = x11_display() else {
+        return 1080.0;
+    };
     unsafe {
         let screen = (xlib.XDefaultScreen)(display);
         (xlib.XDisplayHeight)(display, screen) as f64
@@ -95,7 +97,9 @@ pub fn display_scale_factor() -> f64 {
 pub fn display_scale_factor() -> f64 {
     use crate::transparent::x11_display;
 
-    let Some((xlib, display)) = x11_display() else { return 1.0 };
+    let Some((xlib, display)) = x11_display() else {
+        return 1.0;
+    };
 
     unsafe {
         // Try Xft.dpi from X resources (set by desktop environments)

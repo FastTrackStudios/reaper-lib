@@ -49,14 +49,8 @@ fn register_class() -> &'static Class {
                 sel!(isOpaque),
                 is_opaque as extern "C" fn(&Object, Sel) -> BOOL,
             );
-            decl.add_method(
-                sel!(keyDown:),
-                key_down as extern "C" fn(&Object, Sel, id),
-            );
-            decl.add_method(
-                sel!(keyUp:),
-                key_up as extern "C" fn(&Object, Sel, id),
-            );
+            decl.add_method(sel!(keyDown:), key_down as extern "C" fn(&Object, Sel, id));
+            decl.add_method(sel!(keyUp:), key_up as extern "C" fn(&Object, Sel, id));
             decl.add_method(
                 sel!(insertText:replacementRange:),
                 insert_text as extern "C" fn(&Object, Sel, id, NSRange),
@@ -65,10 +59,7 @@ fn register_class() -> &'static Class {
                 sel!(mouseDown:),
                 mouse_down as extern "C" fn(&Object, Sel, id),
             );
-            decl.add_method(
-                sel!(mouseUp:),
-                mouse_up as extern "C" fn(&Object, Sel, id),
-            );
+            decl.add_method(sel!(mouseUp:), mouse_up as extern "C" fn(&Object, Sel, id));
             decl.add_method(
                 sel!(mouseDragged:),
                 mouse_dragged as extern "C" fn(&Object, Sel, id),
@@ -116,9 +107,15 @@ struct NSRange {
     length: NSUInteger,
 }
 
-extern "C" fn accepts_first_responder(_this: &Object, _sel: Sel) -> BOOL { YES }
-extern "C" fn can_become_key_view(_this: &Object, _sel: Sel) -> BOOL { YES }
-extern "C" fn is_opaque(_this: &Object, _sel: Sel) -> BOOL { NO }
+extern "C" fn accepts_first_responder(_this: &Object, _sel: Sel) -> BOOL {
+    YES
+}
+extern "C" fn can_become_key_view(_this: &Object, _sel: Sel) -> BOOL {
+    YES
+}
+extern "C" fn is_opaque(_this: &Object, _sel: Sel) -> BOOL {
+    NO
+}
 
 fn parent_hwnd(this: &Object) -> raw::HWND {
     unsafe {
@@ -172,9 +169,8 @@ extern "C" fn insert_text(this: &Object, _sel: Sel, text: id, _range: NSRange) {
             let s = std::ffi::CStr::from_ptr(utf8_ptr)
                 .to_string_lossy()
                 .into_owned();
-            let event = blitz_traits::events::UiEvent::Ime(
-                blitz_traits::events::BlitzImeEvent::Commit(s),
-            );
+            let event =
+                blitz_traits::events::UiEvent::Ime(blitz_traits::events::BlitzImeEvent::Commit(s));
             crate::dock::forward_keyboard_event(hwnd, event);
         }
     }
@@ -207,10 +203,18 @@ fn ns_key_event_to_blitz(event: id, pressed: bool) -> Option<blitz_traits::event
         let code = mac_keycode_to_code(keycode);
 
         let mut mods = Modifiers::empty();
-        if modifiers_raw & (1 << 17) != 0 { mods |= Modifiers::SHIFT; }   // NSEventModifierFlagShift
-        if modifiers_raw & (1 << 18) != 0 { mods |= Modifiers::CONTROL; } // NSEventModifierFlagControl
-        if modifiers_raw & (1 << 19) != 0 { mods |= Modifiers::ALT; }     // NSEventModifierFlagOption
-        if modifiers_raw & (1 << 20) != 0 { mods |= Modifiers::META; }    // NSEventModifierFlagCommand
+        if modifiers_raw & (1 << 17) != 0 {
+            mods |= Modifiers::SHIFT;
+        } // NSEventModifierFlagShift
+        if modifiers_raw & (1 << 18) != 0 {
+            mods |= Modifiers::CONTROL;
+        } // NSEventModifierFlagControl
+        if modifiers_raw & (1 << 19) != 0 {
+            mods |= Modifiers::ALT;
+        } // NSEventModifierFlagOption
+        if modifiers_raw & (1 << 20) != 0 {
+            mods |= Modifiers::META;
+        } // NSEventModifierFlagCommand
 
         Some(UiEvent::KeyDown(BlitzKeyEvent {
             key,
@@ -219,19 +223,31 @@ fn ns_key_event_to_blitz(event: id, pressed: bool) -> Option<blitz_traits::event
             location: Location::Standard,
             is_auto_repeating: is_repeat == YES,
             is_composing: false,
-            state: if pressed { KeyState::Pressed } else { KeyState::Released },
+            state: if pressed {
+                KeyState::Pressed
+            } else {
+                KeyState::Released
+            },
             text: None,
         }))
         .map(|e| {
             // We built KeyDown above; convert to KeyUp for key_up().
-            if pressed { e } else if let UiEvent::KeyDown(k) = e { UiEvent::KeyUp(k) } else { e }
+            if pressed {
+                e
+            } else if let UiEvent::KeyDown(k) = e {
+                UiEvent::KeyUp(k)
+            } else {
+                e
+            }
         })
     }
 }
 
 // ── Mouse forwarding ────────────────────────────────────────────────────
 
-extern "C" fn accepts_first_mouse(_this: &Object, _sel: Sel, _event: id) -> BOOL { YES }
+extern "C" fn accepts_first_mouse(_this: &Object, _sel: Sel, _event: id) -> BOOL {
+    YES
+}
 
 fn mouse_location_in_view(this: &Object, event: id) -> Option<(f32, f32, f32, f32)> {
     unsafe {
@@ -252,10 +268,18 @@ fn ns_event_modifiers(event: id) -> keyboard_types::Modifiers {
     let mut mods = Modifiers::empty();
     unsafe {
         let flags: NSUInteger = msg_send![event, modifierFlags];
-        if flags & (1 << 17) != 0 { mods |= Modifiers::SHIFT; }
-        if flags & (1 << 18) != 0 { mods |= Modifiers::CONTROL; }
-        if flags & (1 << 19) != 0 { mods |= Modifiers::ALT; }
-        if flags & (1 << 20) != 0 { mods |= Modifiers::META; }
+        if flags & (1 << 17) != 0 {
+            mods |= Modifiers::SHIFT;
+        }
+        if flags & (1 << 18) != 0 {
+            mods |= Modifiers::CONTROL;
+        }
+        if flags & (1 << 19) != 0 {
+            mods |= Modifiers::ALT;
+        }
+        if flags & (1 << 20) != 0 {
+            mods |= Modifiers::META;
+        }
     }
     mods
 }
@@ -267,8 +291,12 @@ fn forward_button(
     down: bool,
 ) {
     let hwnd = parent_hwnd(this);
-    if hwnd.is_null() { return; }
-    let Some((x, y, _w, _h)) = mouse_location_in_view(this, event) else { return };
+    if hwnd.is_null() {
+        return;
+    }
+    let Some((x, y, _w, _h)) = mouse_location_in_view(this, event) else {
+        return;
+    };
     let mods = ns_event_modifiers(event);
     let buttons = if down {
         blitz_traits::events::MouseEventButtons::Primary
@@ -276,7 +304,11 @@ fn forward_button(
         blitz_traits::events::MouseEventButtons::empty()
     };
     let ev = blitz_traits::events::BlitzMouseButtonEvent {
-        x, y, button, buttons, mods,
+        x,
+        y,
+        button,
+        buttons,
+        mods,
     };
     let ui_event = if down {
         blitz_traits::events::UiEvent::MouseDown(ev)
@@ -294,70 +326,105 @@ extern "C" fn mouse_down(this: &Object, _sel: Sel, event: id) {
             let _: () = msg_send![window, makeFirstResponder: this];
         }
     }
-    forward_button(this, event, blitz_traits::events::MouseEventButton::Main, true);
+    forward_button(
+        this,
+        event,
+        blitz_traits::events::MouseEventButton::Main,
+        true,
+    );
 }
 
 extern "C" fn mouse_up(this: &Object, _sel: Sel, event: id) {
-    forward_button(this, event, blitz_traits::events::MouseEventButton::Main, false);
+    forward_button(
+        this,
+        event,
+        blitz_traits::events::MouseEventButton::Main,
+        false,
+    );
 }
 
 extern "C" fn right_mouse_down(this: &Object, _sel: Sel, event: id) {
-    forward_button(this, event, blitz_traits::events::MouseEventButton::Secondary, true);
+    forward_button(
+        this,
+        event,
+        blitz_traits::events::MouseEventButton::Secondary,
+        true,
+    );
 }
 
 extern "C" fn right_mouse_up(this: &Object, _sel: Sel, event: id) {
-    forward_button(this, event, blitz_traits::events::MouseEventButton::Secondary, false);
+    forward_button(
+        this,
+        event,
+        blitz_traits::events::MouseEventButton::Secondary,
+        false,
+    );
 }
 
 extern "C" fn other_mouse_down(this: &Object, _sel: Sel, event: id) {
-    forward_button(this, event, blitz_traits::events::MouseEventButton::Auxiliary, true);
+    forward_button(
+        this,
+        event,
+        blitz_traits::events::MouseEventButton::Auxiliary,
+        true,
+    );
 }
 
 extern "C" fn other_mouse_up(this: &Object, _sel: Sel, event: id) {
-    forward_button(this, event, blitz_traits::events::MouseEventButton::Auxiliary, false);
+    forward_button(
+        this,
+        event,
+        blitz_traits::events::MouseEventButton::Auxiliary,
+        false,
+    );
 }
 
 extern "C" fn mouse_dragged(this: &Object, _sel: Sel, event: id) {
     let hwnd = parent_hwnd(this);
-    if hwnd.is_null() { return; }
-    let Some((x, y, _, _)) = mouse_location_in_view(this, event) else { return };
+    if hwnd.is_null() {
+        return;
+    }
+    let Some((x, y, _, _)) = mouse_location_in_view(this, event) else {
+        return;
+    };
     let mods = ns_event_modifiers(event);
     let ev = blitz_traits::events::BlitzMouseButtonEvent {
-        x, y,
+        x,
+        y,
         button: blitz_traits::events::MouseEventButton::Main,
         buttons: blitz_traits::events::MouseEventButtons::Primary,
         mods,
     };
-    crate::dock::forward_keyboard_event(
-        hwnd,
-        blitz_traits::events::UiEvent::MouseMove(ev),
-    );
+    crate::dock::forward_keyboard_event(hwnd, blitz_traits::events::UiEvent::MouseMove(ev));
 }
 
 extern "C" fn scroll_wheel(this: &Object, _sel: Sel, event: id) {
     let hwnd = parent_hwnd(this);
-    if hwnd.is_null() { return; }
-    let Some((x, y, _, _)) = mouse_location_in_view(this, event) else { return };
+    if hwnd.is_null() {
+        return;
+    }
+    let Some((x, y, _, _)) = mouse_location_in_view(this, event) else {
+        return;
+    };
     let mods = ns_event_modifiers(event);
     unsafe {
         let dx: f64 = msg_send![event, scrollingDeltaX];
         let dy: f64 = msg_send![event, scrollingDeltaY];
         let has_precise: BOOL = msg_send![event, hasPreciseScrollingDeltas];
-        let (mult_x, mult_y) = if has_precise == YES { (1.0, 1.0) } else { (16.0, 16.0) };
+        let (mult_x, mult_y) = if has_precise == YES {
+            (1.0, 1.0)
+        } else {
+            (16.0, 16.0)
+        };
         let ev = blitz_traits::events::BlitzWheelEvent {
-            delta: blitz_traits::events::BlitzWheelDelta::Pixels(
-                dx * mult_x,
-                dy * mult_y,
-            ),
-            x, y,
+            delta: blitz_traits::events::BlitzWheelDelta::Pixels(dx * mult_x, dy * mult_y),
+            x,
+            y,
             button: blitz_traits::events::MouseEventButton::Main,
             buttons: blitz_traits::events::MouseEventButtons::empty(),
             mods,
         };
-        crate::dock::forward_keyboard_event(
-            hwnd,
-            blitz_traits::events::UiEvent::Wheel(ev),
-        );
+        crate::dock::forward_keyboard_event(hwnd, blitz_traits::events::UiEvent::Wheel(ev));
     }
 }
 

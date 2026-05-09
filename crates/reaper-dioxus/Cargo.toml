@@ -24,7 +24,7 @@ blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
 
 # Rendering pipeline
-anyrender_vello = "0.6"
+anyrender_vello = "0.8"
 vello.workspace = true
 wgpu.workspace = true
 
@@ -39,10 +39,13 @@ futures-util = "0.3"
 crossbeam = "0.8"
 raw-window-handle = "0.6"
 tracing.workspace = true
+dioxus-embedded = { path = "/home/cody/Development/Dioxus/dioxus-embedded/crates/dioxus-embedded", features = ["dioxus-desktop"], optional = true }
+gtk = { version = "0.18", optional = true }
 
 [features]
 default = ["hot-reload"]
 hot-reload = ["dep:dioxus-devtools"]
+desktop-renderer = ["dep:dioxus-embedded", "dep:gtk"]
 
 [target.'cfg(target_os = "linux")'.dependencies]
 libc = "0.2"

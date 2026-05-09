@@ -19,7 +19,7 @@
 
 use std::error::Error;
 
-use reaper_high::{Reaper as HighReaper};
+use reaper_high::Reaper as HighReaper;
 use reaper_low::PluginContext;
 use reaper_macros::reaper_extension_plugin;
 use reaper_medium::ReaperSession;
@@ -49,7 +49,7 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     reaper_dioxus::restore_dock_state();
 
     // Register the timer that drives panel rendering
-    let session = ReaperSession::load(context);
+    let _session = ReaperSession::load(context);
     // Note: we can't hold the session — just register and drop
     // The timer callback is a static extern "C" fn
 
@@ -57,10 +57,10 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-/// Timer callback — drives all panel rendering at ~30Hz.
-/// Registered by FTS-Extensions (or whichever host manages the main timer).
-/// reaper-dioxus provides the `service::tick()` function for this.
-///
-/// Note: In practice, FTS-Extensions already has a timer callback that
-/// calls `reaper_dioxus::service::tick()`. The extension itself doesn't
-/// need its own timer since the host drives rendering.
+// Timer callback — drives all panel rendering at ~30Hz.
+// Registered by FTS-Extensions (or whichever host manages the main timer).
+// reaper-dioxus provides the `service::tick()` function for this.
+//
+// Note: In practice, FTS-Extensions already has a timer callback that
+// calls `reaper_dioxus::service::tick()`. The extension itself doesn't
+// need its own timer since the host drives rendering.

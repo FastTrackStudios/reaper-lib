@@ -141,6 +141,7 @@ impl GpuState {
                 required_limits: limits,
                 memory_hints: MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
             }))?;
 
         let surface_caps = surface.get_capabilities(&adapter);
@@ -246,6 +247,7 @@ impl GpuState {
                 required_limits: limits,
                 memory_hints: MemoryHints::Performance,
                 trace: wgpu::Trace::Off,
+                experimental_features: wgpu::ExperimentalFeatures::default(),
             }))?;
 
         let present_format = TextureFormat::Bgra8Unorm;
@@ -311,9 +313,8 @@ impl GpuState {
             surface.configure(&self.device, &self.surface_config);
         }
         if self.offscreen_target.is_some() {
-            let (tex, buf, row_pitch) = create_offscreen_resources(
-                &self.device, width, height, self.surface_config.format,
-            );
+            let (tex, buf, row_pitch) =
+                create_offscreen_resources(&self.device, width, height, self.surface_config.format);
             self.offscreen_target = Some(tex);
             self.readback_buffer = Some(buf);
             self.readback_row_pitch = row_pitch;
@@ -323,7 +324,10 @@ impl GpuState {
     /// Render a Vello scene to the surface (panics in offscreen mode — use
     /// [`render_offscreen`] instead).
     pub fn render(&mut self, scene: &Scene) -> Result<(), GpuError> {
-        let surface = self.surface.as_ref().expect("render() requires surface mode; use render_offscreen");
+        let surface = self
+            .surface
+            .as_ref()
+            .expect("render() requires surface mode; use render_offscreen");
         let surface_texture = surface.get_current_texture()?;
 
         let intermediate_view = self
@@ -363,7 +367,9 @@ impl GpuState {
     /// After this returns, [`read_pixels`] can be used to copy the rendered
     /// bytes back to a CPU buffer suitable for `StretchBltFromMem`.
     pub fn render_offscreen(&mut self, scene: &Scene) -> Result<(), GpuError> {
-        let target = self.offscreen_target.as_ref()
+        let target = self
+            .offscreen_target
+            .as_ref()
             .expect("render_offscreen() requires offscreen mode; use render");
 
         let intermediate_view = self
@@ -398,9 +404,13 @@ impl GpuState {
     /// `out` is resized to `width * height * 4` bytes. Blocks until the GPU
     /// copy completes (synchronous mapping). Returns an error in surface mode.
     pub fn read_pixels(&self, out: &mut Vec<u8>) -> Result<(), GpuError> {
-        let target = self.offscreen_target.as_ref()
+        let target = self
+            .offscreen_target
+            .as_ref()
             .ok_or(GpuError::InvalidWindowHandle)?;
-        let buffer = self.readback_buffer.as_ref()
+        let buffer = self
+            .readback_buffer
+            .as_ref()
             .ok_or(GpuError::InvalidWindowHandle)?;
 
         let width = self.surface_config.width;
@@ -408,9 +418,11 @@ impl GpuState {
         let row_pitch = self.readback_row_pitch;
 
         // Copy texture → padded buffer
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
-            label: Some("Offscreen Readback"),
-        });
+        let mut encoder = self
+            .device
+            .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                label: Some("Offscreen Readback"),
+            });
         encoder.copy_texture_to_buffer(
             wgpu::TexelCopyTextureInfo {
                 texture: target,
@@ -426,7 +438,11 @@ impl GpuState {
                     rows_per_image: Some(height),
                 },
             },
-            Extent3d { width, height, depth_or_array_layers: 1 },
+            Extent3d {
+                width,
+                height,
+                depth_or_array_layers: 1,
+            },
         );
         self.queue.submit(std::iter::once(encoder.finish()));
 
@@ -436,7 +452,12 @@ impl GpuState {
         slice.map_async(wgpu::MapMode::Read, move |res| {
             let _ = tx.send(res);
         });
-        self.device.poll(wgpu::PollType::Wait).ok();
+        self.device
+            .poll(wgpu::PollType::Wait {
+                submission_index: None,
+                timeout: None,
+            })
+            .ok();
         rx.recv().ok().and_then(|r| r.ok());
 
         let tight_stride = (width * 4) as usize;
@@ -477,7 +498,11 @@ fn create_offscreen_resources(
 
     let target = device.create_texture(&TextureDescriptor {
         label: Some("Offscreen Present Target"),
-        size: Extent3d { width, height, depth_or_array_layers: 1 },
+        size: Extent3d {
+            width,
+            height,
+            depth_or_array_layers: 1,
+        },
         mip_level_count: 1,
         sample_count: 1,
         dimension: TextureDimension::D2,
@@ -554,7 +579,7 @@ impl TextureBlitter {
         let pipeline_layout = device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: Some("Blit Pipeline Layout"),
             bind_group_layouts: &[&bind_group_layout],
-            push_constant_ranges: &[],
+            immediate_size: 0,
         });
 
         let pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
@@ -582,7 +607,7 @@ impl TextureBlitter {
             },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
-            multiview: None,
+            multiview_mask: None,
             cache: None,
         });
 
@@ -641,6 +666,7 @@ impl TextureBlitter {
                 depth_stencil_attachment: None,
                 timestamp_writes: None,
                 occlusion_query_set: None,
+                multiview_mask: None,
             });
 
             render_pass.set_pipeline(&self.pipeline);

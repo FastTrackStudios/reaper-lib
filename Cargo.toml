@@ -46,8 +46,8 @@ winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
 libloading = "0.9"
 
 # reaper-embed dependencies
-wgpu = { version = "26", features = ["wgsl"] }
-vello = { version = "0.6", features = ["wgpu"] }
+wgpu = { version = "28", features = ["wgsl"] }
+vello = { version = "0.8", features = ["wgpu"] }
 skrifa = "0.37"
 pollster = "0.4"
 cocoa = "0.26"
@@ -75,3 +75,30 @@ anyrender_vello_cpu = { git = "https://github.com/FastTrackStudios/anyrender.git
 anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
 anyrender_svg = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
 wgpu_context = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
+
+# Keep the Blitz native renderer and the embedded Dioxus desktop renderer on
+# one Dioxus core. The desktop renderer uses our local fork to expose the
+# host-driven Wry bridge, so native's Dioxus dependencies must resolve there
+# too when `reaper-dioxus/desktop-renderer` is enabled.
+dioxus = { path = "/home/cody/Development/Dioxus/dioxus/packages/dioxus" }
+dioxus-asset-resolver = { path = "/home/cody/Development/Dioxus/dioxus/packages/asset-resolver" }
+dioxus-cli-config = { path = "/home/cody/Development/Dioxus/dioxus/packages/cli-config" }
+dioxus-config-macros = { path = "/home/cody/Development/Dioxus/dioxus/packages/config-macros" }
+dioxus-core = { path = "/home/cody/Development/Dioxus/dioxus/packages/core" }
+dioxus-core-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/core-macro" }
+dioxus-core-types = { path = "/home/cody/Development/Dioxus/dioxus/packages/core-types" }
+dioxus-devtools = { path = "/home/cody/Development/Dioxus/dioxus/packages/devtools" }
+dioxus-devtools-types = { path = "/home/cody/Development/Dioxus/dioxus/packages/devtools-types" }
+dioxus-document = { path = "/home/cody/Development/Dioxus/dioxus/packages/document" }
+dioxus-history = { path = "/home/cody/Development/Dioxus/dioxus/packages/history" }
+dioxus-hooks = { path = "/home/cody/Development/Dioxus/dioxus/packages/hooks" }
+dioxus-html = { path = "/home/cody/Development/Dioxus/dioxus/packages/html" }
+dioxus-html-internal-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/html-internal-macro" }
+dioxus-rsx = { path = "/home/cody/Development/Dioxus/dioxus/packages/rsx" }
+dioxus-signals = { path = "/home/cody/Development/Dioxus/dioxus/packages/signals" }
+dioxus-stores = { path = "/home/cody/Development/Dioxus/dioxus/packages/stores" }
+dioxus-stores-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/stores-macro" }
+generational-box = { path = "/home/cody/Development/Dioxus/dioxus/packages/generational-box" }
+manganis = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis" }
+manganis-core = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-core" }
+manganis-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-macro" }

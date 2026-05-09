@@ -18,8 +18,8 @@ use dioxus_native::{DioxusDocument, DocumentConfig};
 use futures_util::task::ArcWake;
 use reaper_embed::{GpuError, GpuState};
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Instant;
 use vello::Scene;
 
@@ -183,7 +183,11 @@ impl EmbeddedView {
         doc.initial_build();
         while let Ok(msg) = doc_rx.try_recv() {
             match msg {
-                DocumentMessage::CreateHeadElement { name, attributes, contents } => {
+                DocumentMessage::CreateHeadElement {
+                    name,
+                    attributes,
+                    contents,
+                } => {
                     doc.create_head_element(&name, &attributes, &contents);
                 }
             }
@@ -260,6 +264,8 @@ impl EmbeddedView {
             self.scale_factor as f64,
             self.width,
             self.height,
+            0,
+            0,
         );
 
         if self.gpu.is_offscreen() {

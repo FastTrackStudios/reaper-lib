@@ -18,5 +18,9 @@ reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branc
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
+[features]
+default = []
+desktop-renderer = ["reaper-dioxus/desktop-renderer"]
+
 [lints.rust]
 unsafe_code = "allow"

@@ -90,8 +90,7 @@ impl HasDisplayHandle for NativeHandleWrapper {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, HandleError> {
         use raw_window_handle::XlibDisplayHandle;
         use std::ptr::NonNull;
-        let display_ptr =
-            NonNull::new(self.display).ok_or(HandleError::Unavailable)?;
+        let display_ptr = NonNull::new(self.display).ok_or(HandleError::Unavailable)?;
         let handle = XlibDisplayHandle::new(Some(display_ptr), 0);
         let raw = RawDisplayHandle::Xlib(handle);
         Ok(unsafe { DisplayHandle::borrow_raw(raw) })
@@ -441,17 +440,21 @@ mod x11_state {
     }
 
     pub fn xlib() -> Option<&'static Xlib> {
-        if !try_init() { return None; }
+        if !try_init() {
+            return None;
+        }
         let guard = GLOBAL.lock().unwrap();
         // SAFETY: Once initialized, the value lives for the process lifetime.
         // We never remove it from the Mutex.
-        guard.as_ref().map(|g| unsafe {
-            &*(&g.xlib as *const Xlib)
-        })
+        guard
+            .as_ref()
+            .map(|g| unsafe { &*(&g.xlib as *const Xlib) })
     }
 
     pub fn display() -> Option<*mut Display> {
-        if !try_init() { return None; }
+        if !try_init() {
+            return None;
+        }
         let guard = GLOBAL.lock().unwrap();
         guard.as_ref().map(|g| g.display)
     }
@@ -465,8 +468,8 @@ fn create_native_transparent_window(
     height: u32,
 ) -> Option<(RawHwnd, NativeHandleWrapper)> {
     use x11_dl::xlib::{
-        AllocNone, CWBackPixel, CWBorderPixel, CWColormap, CWOverrideRedirect,
-        InputOutput, True, TrueColor, XSetWindowAttributes, XVisualInfo,
+        AllocNone, CWBackPixel, CWBorderPixel, CWColormap, CWOverrideRedirect, InputOutput, True,
+        TrueColor, XSetWindowAttributes, XVisualInfo,
     };
 
     let xlib = x11_state::xlib()?;
@@ -485,8 +488,7 @@ fn create_native_transparent_window(
         }
 
         // Create a colormap for the 32-bit visual
-        let colormap =
-            (xlib.XCreateColormap)(display, root, visual_info.visual, AllocNone);
+        let colormap = (xlib.XCreateColormap)(display, root, visual_info.visual, AllocNone);
 
         let mut attrs: XSetWindowAttributes = std::mem::zeroed();
         attrs.override_redirect = True;
@@ -503,7 +505,7 @@ fn create_native_transparent_window(
             y,
             width,
             height,
-            0, // border width
+            0,  // border width
             32, // depth — must match visual
             InputOutput as u32,
             visual_info.visual,
@@ -522,7 +524,13 @@ fn create_native_transparent_window(
 
         (xlib.XFlush)(display);
 
-        tracing::debug!(x, y, width, height, "Created X11 transparent overlay window");
+        tracing::debug!(
+            x,
+            y,
+            width,
+            height,
+            "Created X11 transparent overlay window"
+        );
 
         let visual_id = visual_info.visualid as u32;
 
@@ -586,8 +594,12 @@ fn set_x11_atoms(xlib_fns: &x11_dl::xlib::Xlib, display: *mut x11_dl::xlib::Disp
 
 #[cfg(target_os = "linux")]
 fn show_native_window(hwnd: RawHwnd, show: bool) {
-    let Some(xlib) = x11_state::xlib() else { return };
-    let Some(display) = x11_state::display() else { return };
+    let Some(xlib) = x11_state::xlib() else {
+        return;
+    };
+    let Some(display) = x11_state::display() else {
+        return;
+    };
     let window = hwnd as u64;
 
     unsafe {
@@ -602,8 +614,12 @@ fn show_native_window(hwnd: RawHwnd, show: bool) {
 
 #[cfg(target_os = "linux")]
 fn set_native_window_frame(hwnd: RawHwnd, x: i32, y: i32, width: u32, height: u32) {
-    let Some(xlib) = x11_state::xlib() else { return };
-    let Some(display) = x11_state::display() else { return };
+    let Some(xlib) = x11_state::xlib() else {
+        return;
+    };
+    let Some(display) = x11_state::display() else {
+        return;
+    };
     let window = hwnd as u64;
 
     unsafe {
@@ -614,8 +630,12 @@ fn set_native_window_frame(hwnd: RawHwnd, x: i32, y: i32, width: u32, height: u3
 
 #[cfg(target_os = "linux")]
 fn close_native_window(hwnd: RawHwnd) {
-    let Some(xlib) = x11_state::xlib() else { return };
-    let Some(display) = x11_state::display() else { return };
+    let Some(xlib) = x11_state::xlib() else {
+        return;
+    };
+    let Some(display) = x11_state::display() else {
+        return;
+    };
     let window = hwnd as u64;
 
     unsafe {
@@ -626,8 +646,12 @@ fn close_native_window(hwnd: RawHwnd) {
 
 #[cfg(target_os = "linux")]
 fn set_native_click_through(hwnd: RawHwnd, click_through: bool) {
-    let Some(xlib) = x11_state::xlib() else { return };
-    let Some(display) = x11_state::display() else { return };
+    let Some(xlib) = x11_state::xlib() else {
+        return;
+    };
+    let Some(display) = x11_state::display() else {
+        return;
+    };
     let window = hwnd as u64;
 
     unsafe {
@@ -637,23 +661,15 @@ fn set_native_click_through(hwnd: RawHwnd, click_through: bool) {
                 // Create an empty region (no input area → all clicks pass through)
                 let region = (xfixes.XFixesCreateRegion)(display, std::ptr::null_mut(), 0);
                 (xfixes.XFixesSetWindowShapeRegion)(
-                    display,
-                    window,
-                    2, // ShapeInput
-                    0,
-                    0,
-                    region,
+                    display, window, 2, // ShapeInput
+                    0, 0, region,
                 );
                 (xfixes.XFixesDestroyRegion)(display, region);
             } else {
                 // Reset to normal (accept input everywhere)
                 (xfixes.XFixesSetWindowShapeRegion)(
-                    display,
-                    window,
-                    2, // ShapeInput
-                    0,
-                    0,
-                    0, // None — reset to default
+                    display, window, 2, // ShapeInput
+                    0, 0, 0, // None — reset to default
                 );
             }
         } else {
