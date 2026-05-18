@@ -9,6 +9,7 @@ use raw_window_handle::{
     DisplayHandle, HasDisplayHandle, HasWindowHandle, RawDisplayHandle, RawWindowHandle,
     WindowHandle,
 };
+use std::sync::{Arc, OnceLock};
 use thiserror::Error;
 use vello::{AaSupport, RenderParams, Renderer as VelloRenderer, RendererOptions, Scene};
 use wgpu::{
@@ -57,6 +58,93 @@ impl HasDisplayHandle for RawHandleWrapper {
     fn display_handle(&self) -> Result<DisplayHandle<'_>, raw_window_handle::HandleError> {
         Ok(unsafe { DisplayHandle::borrow_raw(self.display_handle) })
     }
+}
+
+// ─── Shared GPU (Instance / Adapter / Device / Queue) ───────────────────────
+//
+// wgpu's Instance/Adapter/Device/Queue are all `Send + Sync` and intended to
+// be shared. Each instantiation pays adapter enumeration + Vulkan/D3D/Metal
+// init (~100ms+ on first call) — and that's repeated for every overlay
+// window unless we cache. Below: build them exactly once, optionally on a
+// background thread, and reuse for every subsequent `GpuState`.
+
+/// Shared wgpu state reused across all `GpuState` instances.
+pub struct SharedGpu {
+    pub instance: Instance,
+    pub adapter: Adapter,
+    pub device: Device,
+    pub queue: Queue,
+}
+
+static SHARED: OnceLock<Arc<SharedGpu>> = OnceLock::new();
+
+fn build_shared() -> Result<Arc<SharedGpu>, GpuError> {
+    let instance = Instance::new(&wgpu::InstanceDescriptor {
+        backends: wgpu::Backends::from_env().unwrap_or_default(),
+        flags: wgpu::InstanceFlags::from_build_config().with_env(),
+        backend_options: wgpu::BackendOptions::from_env_or_default(),
+        ..Default::default()
+    });
+
+    // No `compatible_surface` here — overlay surfaces don't exist yet at
+    // prewarm time. On all our target platforms a single adapter from a
+    // given Instance is compatible with any window surface produced via
+    // the same display server, so this is safe in practice.
+    let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
+        power_preference: wgpu::PowerPreference::HighPerformance,
+        compatible_surface: None,
+        force_fallback_adapter: false,
+    }))?;
+
+    let features = adapter.features() & Features::empty();
+    let limits = adapter.limits();
+    let (device, queue) = pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        label: Some("reaper-embed-shared"),
+        required_features: features,
+        required_limits: limits,
+        memory_hints: MemoryHints::Performance,
+        trace: wgpu::Trace::Off,
+        experimental_features: wgpu::ExperimentalFeatures::default(),
+    }))?;
+
+    Ok(Arc::new(SharedGpu {
+        instance,
+        adapter,
+        device,
+        queue,
+    }))
+}
+
+fn shared_gpu_clone() -> Result<Arc<SharedGpu>, GpuError> {
+    if let Some(s) = SHARED.get() {
+        return Ok(s.clone());
+    }
+    let built = build_shared()?;
+    // Race tolerant: if the prewarm thread won, our value is dropped and
+    // we return whatever's stored (semantically identical).
+    let _ = SHARED.set(built);
+    Ok(SHARED.get().expect("just set or won race").clone())
+}
+
+/// Start building the shared GPU state on a background thread, returning
+/// immediately. Subsequent `GpuState::new` / `new_offscreen` calls block
+/// until it's ready (or trigger a synchronous build if prewarm hasn't run).
+///
+/// Safe to call from any thread, including before the host window exists,
+/// because no surface is involved here.
+pub fn prewarm_shared_gpu() {
+    if SHARED.get().is_some() {
+        return;
+    }
+    std::thread::Builder::new()
+        .name("reaper-embed-gpu-prewarm".into())
+        .spawn(|| match build_shared() {
+            Ok(s) => {
+                let _ = SHARED.set(s);
+            }
+            Err(e) => tracing::warn!("shared GPU prewarm failed: {e}"),
+        })
+        .ok();
 }
 
 /// GPU state for Vello rendering.
@@ -116,35 +204,22 @@ impl GpuState {
             display_handle,
         };
 
-        let instance = Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or_default(),
-            flags: wgpu::InstanceFlags::from_build_config().with_env(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-            ..Default::default()
-        });
+        let t_start = std::time::Instant::now();
 
-        let surface = instance.create_surface(handle_wrapper)?;
+        // Reuse the process-wide wgpu Instance/Adapter/Device/Queue if it's
+        // been built (typically by `prewarm_shared_gpu` on a worker thread),
+        // otherwise build it now synchronously. This skips the ~100ms+
+        // per-overlay adapter+device init that was the bulk of overlay
+        // creation cost.
+        let shared = shared_gpu_clone()?;
+        let t_shared = t_start.elapsed();
 
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: Some(&surface),
-            force_fallback_adapter: false,
-        }))?;
+        let t = std::time::Instant::now();
+        let surface = shared.instance.create_surface(handle_wrapper)?;
+        let t_create_surface = t.elapsed();
 
-        let features = adapter.features() & Features::empty();
-        let limits = adapter.limits();
-
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("reaper-embed"),
-                required_features: features,
-                required_limits: limits,
-                memory_hints: MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-            }))?;
-
-        let surface_caps = surface.get_capabilities(&adapter);
+        let t = std::time::Instant::now();
+        let surface_caps = surface.get_capabilities(&shared.adapter);
         // Prefer non-sRGB format: Vello outputs sRGB values into Rgba8Unorm,
         // so using an sRGB surface would double-apply gamma correction.
         let surface_format = surface_caps
@@ -168,6 +243,8 @@ impl GpuState {
             .copied()
             .unwrap_or(surface_caps.alpha_modes[0]);
 
+        let t_surface_caps = t.elapsed();
+
         tracing::info!(
             ?surface_format,
             ?alpha_mode,
@@ -186,10 +263,13 @@ impl GpuState {
             alpha_mode,
             view_formats: vec![],
         };
-        surface.configure(&device, &surface_config);
+        let t = std::time::Instant::now();
+        surface.configure(&shared.device, &surface_config);
+        let t_configure = t.elapsed();
 
+        let t = std::time::Instant::now();
         let vello_renderer = VelloRenderer::new(
-            &device,
+            &shared.device,
             RendererOptions {
                 use_cpu: false,
                 antialiasing_support: AaSupport::area_only(),
@@ -197,14 +277,28 @@ impl GpuState {
                 pipeline_cache: None,
             },
         )?;
+        let t_vello = t.elapsed();
 
+        let t = std::time::Instant::now();
         let intermediate_texture =
-            create_intermediate_texture(&device, width.max(1), height.max(1));
-        let texture_blitter = TextureBlitter::new(&device, surface_format);
+            create_intermediate_texture(&shared.device, width.max(1), height.max(1));
+        let texture_blitter = TextureBlitter::new(&shared.device, surface_format);
+        let t_textures = t.elapsed();
+
+        tracing::info!(
+            shared_ms = t_shared.as_millis(),
+            create_surface_ms = t_create_surface.as_millis(),
+            surface_caps_ms = t_surface_caps.as_millis(),
+            configure_ms = t_configure.as_millis(),
+            vello_renderer_ms = t_vello.as_millis(),
+            textures_ms = t_textures.as_millis(),
+            total_ms = t_start.elapsed().as_millis(),
+            "GpuState::new timing"
+        );
 
         Ok(Self {
-            device,
-            queue,
+            device: shared.device.clone(),
+            queue: shared.queue.clone(),
             surface: Some(surface),
             surface_config,
             vello_renderer,
@@ -213,7 +307,7 @@ impl GpuState {
             offscreen_target: None,
             readback_buffer: None,
             readback_row_pitch: 0,
-            adapter,
+            adapter: shared.adapter.clone(),
         })
     }
 
@@ -224,35 +318,11 @@ impl GpuState {
     /// `StretchBltFromMem` under `WM_PAINT`). Output format is BGRA8 to
     /// match LICE's pixel layout on Linux/macOS SWELL.
     pub fn new_offscreen(width: u32, height: u32) -> Result<Self, GpuError> {
-        let instance = Instance::new(&wgpu::InstanceDescriptor {
-            backends: wgpu::Backends::from_env().unwrap_or_default(),
-            flags: wgpu::InstanceFlags::from_build_config().with_env(),
-            backend_options: wgpu::BackendOptions::from_env_or_default(),
-            ..Default::default()
-        });
-
-        let adapter = pollster::block_on(instance.request_adapter(&wgpu::RequestAdapterOptions {
-            power_preference: wgpu::PowerPreference::HighPerformance,
-            compatible_surface: None,
-            force_fallback_adapter: false,
-        }))?;
-
-        let features = adapter.features() & Features::empty();
-        let limits = adapter.limits();
-
-        let (device, queue) =
-            pollster::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
-                label: Some("reaper-embed-offscreen"),
-                required_features: features,
-                required_limits: limits,
-                memory_hints: MemoryHints::Performance,
-                trace: wgpu::Trace::Off,
-                experimental_features: wgpu::ExperimentalFeatures::default(),
-            }))?;
+        let shared = shared_gpu_clone()?;
 
         let present_format = TextureFormat::Bgra8Unorm;
         let vello_renderer = VelloRenderer::new(
-            &device,
+            &shared.device,
             RendererOptions {
                 use_cpu: false,
                 antialiasing_support: AaSupport::area_only(),
@@ -263,10 +333,10 @@ impl GpuState {
 
         let width = width.max(1);
         let height = height.max(1);
-        let intermediate_texture = create_intermediate_texture(&device, width, height);
-        let texture_blitter = TextureBlitter::new(&device, present_format);
+        let intermediate_texture = create_intermediate_texture(&shared.device, width, height);
+        let texture_blitter = TextureBlitter::new(&shared.device, present_format);
         let (offscreen_target, readback_buffer, row_pitch) =
-            create_offscreen_resources(&device, width, height, present_format);
+            create_offscreen_resources(&shared.device, width, height, present_format);
 
         // Surface config shape is preserved so shared code can read width/height.
         let surface_config = SurfaceConfiguration {
@@ -283,8 +353,8 @@ impl GpuState {
         tracing::info!(width, height, "Offscreen GPU state created");
 
         Ok(Self {
-            device,
-            queue,
+            device: shared.device.clone(),
+            queue: shared.queue.clone(),
             surface: None,
             surface_config,
             vello_renderer,
@@ -293,7 +363,7 @@ impl GpuState {
             offscreen_target: Some(offscreen_target),
             readback_buffer: Some(readback_buffer),
             readback_row_pitch: row_pitch,
-            adapter,
+            adapter: shared.adapter.clone(),
         })
     }
 

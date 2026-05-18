@@ -13,7 +13,6 @@ use dioxus_native::prelude::*;
 use dioxus_native::{DioxusDocument, DocumentConfig};
 use futures_util::task::ArcWake;
 use reaper_embed::TransparentWindow;
-use reaper_high::Reaper;
 use std::rc::Rc;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -112,6 +111,8 @@ pub struct OverlayConfig {
     pub interactive: bool,
     /// Whether to auto-fit the window size to the DOM content after initial build.
     pub auto_fit: bool,
+    /// Whether to hide the window after the initial render for later instant display.
+    pub start_hidden: bool,
 }
 
 impl Default for OverlayConfig {
@@ -119,6 +120,7 @@ impl Default for OverlayConfig {
         Self {
             interactive: false,
             auto_fit: false,
+            start_hidden: false,
         }
     }
 }
@@ -152,6 +154,12 @@ impl DioxusOverlayBuilder {
     /// Auto-fit the window size to DOM content after initial build.
     pub fn auto_fit(mut self, auto_fit: bool) -> Self {
         self.config.auto_fit = auto_fit;
+        self
+    }
+
+    /// Build and render the overlay, then hide it before returning.
+    pub fn start_hidden(mut self, start_hidden: bool) -> Self {
+        self.config.start_hidden = start_hidden;
         self
     }
 
@@ -220,14 +228,14 @@ impl DioxusOverlay {
         let width = width.max(1);
         let height = height.max(1);
 
-        Reaper::get().show_console_msg(format!(
-            "[DEBUG] DioxusOverlay build: begin frame=({}, {}, {}, {})\n",
-            x, y, width, height
-        ));
+        let t_start = std::time::Instant::now();
+        tracing::debug!(x, y, width, height, "DioxusOverlay build: begin");
 
         // Create the transparent window (platform-specific: macOS Cocoa, Linux X11)
+        let t = std::time::Instant::now();
         let mut window = TransparentWindow::open(x, y, width, height)?;
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: transparent window opened\n");
+        let t_window_open = t.elapsed();
+        tracing::debug!("DioxusOverlay build: transparent window opened");
 
         // Set click-through based on config
         if !config.interactive {
@@ -238,20 +246,18 @@ impl DioxusOverlay {
         }
 
         window.show();
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: window shown\n");
+        tracing::debug!("DioxusOverlay build: window shown");
 
         // Query HiDPI scale factor
         let scale_factor = reaper_embed::display_scale_factor() as f32;
-        Reaper::get().show_console_msg(format!(
-            "[DEBUG] DioxusOverlay build: scale_factor={}\n",
-            scale_factor
-        ));
+        tracing::debug!(scale_factor, "DioxusOverlay build: display scale");
 
         // Set up document::Style message channel
         let (doc_tx, doc_rx) = unbounded();
         let doc_proxy = Rc::new(DocumentProxy::new(doc_tx));
 
         // Create the Dioxus virtual DOM and document
+        let t = std::time::Instant::now();
         let vdom = VirtualDom::new(app);
         let viewport = Viewport::new(width, height, scale_factor, ColorScheme::Dark);
 
@@ -262,7 +268,8 @@ impl DioxusOverlay {
                 ..Default::default()
             },
         );
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: document created\n");
+        let t_doc_create = t.elapsed();
+        tracing::debug!("DioxusOverlay build: document created");
 
         // Inject contexts into the root scope before initial build
         doc.vdom.in_scope(ScopeId::ROOT, || {
@@ -274,13 +281,16 @@ impl DioxusOverlay {
                 ctx_fn();
             }
         });
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: contexts injected\n");
+        tracing::debug!("DioxusOverlay build: contexts injected");
 
         // Initial DOM build — this may queue document::Style messages
+        let t = std::time::Instant::now();
         doc.initial_build();
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: initial DOM built\n");
+        let t_initial_build = t.elapsed();
+        tracing::debug!("DioxusOverlay build: initial DOM built");
 
         // Process any document::Style messages before first layout
+        let t = std::time::Instant::now();
         while let Ok(msg) = doc_rx.try_recv() {
             match msg {
                 DocumentMessage::CreateHeadElement {
@@ -292,11 +302,14 @@ impl DioxusOverlay {
                 }
             }
         }
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: head messages processed\n");
+        let t_head_msgs = t.elapsed();
+        tracing::debug!("DioxusOverlay build: head messages processed");
 
         // Resolve Taffy layout
+        let t = std::time::Instant::now();
         doc.inner_mut().resolve(0.0);
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: layout resolved\n");
+        let t_layout = t.elapsed();
+        tracing::debug!("DioxusOverlay build: layout resolved");
 
         // Auto-fit: query the root element's layout size and resize window to fit
         if config.auto_fit {
@@ -315,7 +328,7 @@ impl DioxusOverlay {
         // Create waker (sets a flag when async tasks need attention)
         let needs_redraw = Arc::new(AtomicBool::new(true));
         let waker = futures_util::task::waker(Arc::new(OverlayWaker(needs_redraw.clone())));
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: initial render\n");
+        tracing::debug!("DioxusOverlay build: initial render");
 
         let mut overlay = Self {
             window,
@@ -330,9 +343,23 @@ impl DioxusOverlay {
             height,
             interactive: config.interactive,
         };
+        let t = std::time::Instant::now();
         overlay.update();
+        let t_first_update = t.elapsed();
+        if config.start_hidden {
+            overlay.hide();
+        }
 
-        Reaper::get().show_console_msg("[DEBUG] DioxusOverlay build: returning overlay\n");
+        tracing::info!(
+            window_open_ms = t_window_open.as_millis(),
+            doc_create_ms = t_doc_create.as_millis(),
+            initial_build_ms = t_initial_build.as_millis(),
+            head_msgs_ms = t_head_msgs.as_millis(),
+            layout_ms = t_layout.as_millis(),
+            first_update_ms = t_first_update.as_millis(),
+            total_ms = t_start.elapsed().as_millis(),
+            "DioxusOverlay build timing"
+        );
 
         Ok(overlay)
     }
@@ -378,7 +405,6 @@ impl DioxusOverlay {
 
         // Render the scene to the window's GPU surface
         if let Err(e) = self.window.render(&self.scene) {
-            Reaper::get().show_console_msg(format!("[DEBUG] DioxusOverlay render error: {e}\n"));
             tracing::debug!("Overlay render error: {e}");
         }
 
