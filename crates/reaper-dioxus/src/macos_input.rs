@@ -17,7 +17,7 @@ use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString, NSUInteger};
 use objc::declare::ClassDecl;
 use objc::rc::StrongPtr;
 use objc::runtime::{Class, Object, Sel};
-use objc::{class, msg_send, sel, sel_impl};
+use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
 use reaper_low::raw;
 use std::ffi::c_void;
 use std::sync::Once;
@@ -105,6 +105,13 @@ fn register_class() -> &'static Class {
 struct NSRange {
     location: NSUInteger,
     length: NSUInteger,
+}
+
+unsafe impl Encode for NSRange {
+    fn encode() -> Encoding {
+        let s = format!("{{_NSRange={0}{0}}}", NSUInteger::encode().as_str());
+        unsafe { Encoding::from_str(&s) }
+    }
 }
 
 extern "C" fn accepts_first_responder(_this: &Object, _sel: Sel) -> BOOL {
@@ -303,19 +310,32 @@ fn forward_button(
     } else {
         blitz_traits::events::MouseEventButtons::empty()
     };
-    let ev = blitz_traits::events::BlitzMouseButtonEvent {
-        x,
-        y,
+    let ev = blitz_traits::events::BlitzPointerEvent {
+        id: blitz_traits::events::BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: pointer_coords(x, y),
         button,
         buttons,
         mods,
+        details: Default::default(),
     };
     let ui_event = if down {
-        blitz_traits::events::UiEvent::MouseDown(ev)
+        blitz_traits::events::UiEvent::PointerDown(ev)
     } else {
-        blitz_traits::events::UiEvent::MouseUp(ev)
+        blitz_traits::events::UiEvent::PointerUp(ev)
     };
     crate::dock::forward_keyboard_event(hwnd, ui_event);
+}
+
+fn pointer_coords(x: f32, y: f32) -> blitz_traits::events::PointerCoords {
+    blitz_traits::events::PointerCoords {
+        page_x: x,
+        page_y: y,
+        screen_x: x,
+        screen_y: y,
+        client_x: x,
+        client_y: y,
+    }
 }
 
 extern "C" fn mouse_down(this: &Object, _sel: Sel, event: id) {
@@ -388,14 +408,16 @@ extern "C" fn mouse_dragged(this: &Object, _sel: Sel, event: id) {
         return;
     };
     let mods = ns_event_modifiers(event);
-    let ev = blitz_traits::events::BlitzMouseButtonEvent {
-        x,
-        y,
+    let ev = blitz_traits::events::BlitzPointerEvent {
+        id: blitz_traits::events::BlitzPointerId::Mouse,
+        is_primary: true,
+        coords: pointer_coords(x, y),
         button: blitz_traits::events::MouseEventButton::Main,
         buttons: blitz_traits::events::MouseEventButtons::Primary,
         mods,
+        details: Default::default(),
     };
-    crate::dock::forward_keyboard_event(hwnd, blitz_traits::events::UiEvent::MouseMove(ev));
+    crate::dock::forward_keyboard_event(hwnd, blitz_traits::events::UiEvent::PointerMove(ev));
 }
 
 extern "C" fn scroll_wheel(this: &Object, _sel: Sel, event: id) {
@@ -418,9 +440,7 @@ extern "C" fn scroll_wheel(this: &Object, _sel: Sel, event: id) {
         };
         let ev = blitz_traits::events::BlitzWheelEvent {
             delta: blitz_traits::events::BlitzWheelDelta::Pixels(dx * mult_x, dy * mult_y),
-            x,
-            y,
-            button: blitz_traits::events::MouseEventButton::Main,
+            coords: pointer_coords(x, y),
             buttons: blitz_traits::events::MouseEventButtons::empty(),
             mods,
         };
