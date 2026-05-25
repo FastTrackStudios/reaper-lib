@@ -24,7 +24,7 @@ blitz-paint = { git = "https://github.com/DioxusLabs/blitz.git" }
 blitz-traits = { git = "https://github.com/DioxusLabs/blitz.git" }
 
 # Rendering pipeline
-anyrender_vello = "0.8"
+anyrender_vello = "0.10"
 vello.workspace = true
 wgpu.workspace = true
 

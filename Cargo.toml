@@ -46,8 +46,8 @@ winapi = { version = "0.3", features = ["winuser", "uxtheme"] }
 libloading = "0.9"
 
 # reaper-embed dependencies
-wgpu = { version = "28", features = ["wgsl"] }
-vello = { version = "0.8", features = ["wgpu"] }
+wgpu = { version = "29", features = ["wgsl"] }
+vello = { version = "0.9", features = ["wgpu"] }
 skrifa = "0.37"
 pollster = "0.4"
 cocoa = "0.26"

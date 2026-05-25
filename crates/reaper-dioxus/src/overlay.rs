@@ -395,7 +395,7 @@ impl DioxusOverlay {
         self.scene.reset();
         paint_scene(
             &mut VelloScenePainter::new(&mut self.scene),
-            &*self.doc.inner(),
+            &mut self.doc.inner_mut(),
             self.scale_factor as f64,
             self.width,
             self.height,
