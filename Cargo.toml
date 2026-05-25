@@ -12,16 +12,16 @@ edition = "2024"
 rust-version = "1.82"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/FastTrackStudios/reaper-lib"
+repository = "https://git.starcommand.live/FastTrackStudios/reaper-lib"
 authors = ["FastTrack Studio"]
 
 [workspace.dependencies]
 # REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
-reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-common-types = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
+reaper-low = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
 
 # DAW module system
 daw = { path = "../daw/crates/daw" }
@@ -52,29 +52,6 @@ skrifa = "0.37"
 pollster = "0.4"
 cocoa = "0.26"
 objc = "0.2.7"
-
-# Patched blitz rendering stack — tracks branch `experimental-css` on the
-# FastTrackStudios fork. Bump rev as features land. Keep all crates pinned
-# to the same rev to avoid dependency-graph drift.
-[patch."https://github.com/DioxusLabs/blitz.git"]
-dioxus-native = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-dioxus-native-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-blitz-dom = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-blitz-html = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-blitz-net = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-blitz-paint = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-blitz-traits = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-blitz-shell = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-stylo_taffy = { git = "https://github.com/FastTrackStudios/blitz.git", rev = "42af9c99" }
-
-# Anyrender fork (same as FTS-Plugins)
-[patch.crates-io]
-anyrender = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_vello = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_vello_cpu = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_vello_hybrid = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-anyrender_svg = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
-wgpu_context = { git = "https://github.com/FastTrackStudios/anyrender.git", rev = "422b5d0" }
 
 # Keep the Blitz native renderer and the embedded Dioxus desktop renderer on
 # one Dioxus core. The desktop renderer uses our local fork to expose the
