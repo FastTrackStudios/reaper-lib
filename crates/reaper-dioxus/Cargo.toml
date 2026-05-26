@@ -55,5 +55,5 @@ x11-dl = "2.21"
 cocoa.workspace = true
 objc.workspace = true
 
-[lints.rust]
-unsafe_code = "allow"
+[lints]
+workspace = true

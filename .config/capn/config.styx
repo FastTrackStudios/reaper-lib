@@ -1,0 +1,19 @@
+@schema {id crate:capn-config@1, cli capn}
+
+pre-commit {
+  generate-readmes false
+  rustfmt true
+  cargo-lock true
+  arborium true
+  edition-2024 true
+  external-path-deps true
+  internal-dev-deps-release-plz true
+}
+
+pre-push {
+  clippy true
+  nextest true
+  doc-tests false
+  docs false
+  cargo-shear true
+}

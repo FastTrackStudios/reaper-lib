@@ -1,4 +1,4 @@
-use crate::{DeviceContext, Pixels, Point, SharedView, Window, create_window};
+use crate::{create_window, DeviceContext, Pixels, Point, SharedView, Window};
 use reaper_low::raw;
 use rxrust::prelude::*;
 

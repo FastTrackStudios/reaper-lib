@@ -17,7 +17,7 @@ use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString, NSUInteger};
 use objc::declare::ClassDecl;
 use objc::rc::StrongPtr;
 use objc::runtime::{Class, Object, Sel};
-use objc::{class, msg_send, sel, sel_impl, Encode, Encoding};
+use objc::{Encode, Encoding, class, msg_send, sel, sel_impl};
 use reaper_low::raw;
 use std::ffi::c_void;
 use std::sync::Once;

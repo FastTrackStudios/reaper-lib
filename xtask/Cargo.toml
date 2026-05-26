@@ -1,0 +1,8 @@
+[package]
+name = "reaper-lib-xtask"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+fts-repo = { git = "https://git.starcommand.live/FastTrackStudios/fts-repo", branch = "main" }

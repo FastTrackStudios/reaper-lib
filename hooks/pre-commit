@@ -1,0 +1,4 @@
+#!/usr/bin/env bash
+set -euo pipefail
+CAPN_BIN="${CAPN_BIN:-capn}"
+exec "$CAPN_BIN" fmt

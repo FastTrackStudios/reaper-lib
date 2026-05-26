@@ -23,7 +23,7 @@ use reaper_low::raw;
 use reaper_low::{Reaper, Swell};
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ffi::{CString, c_void};
+use std::ffi::CString;
 use std::os::raw::c_int;
 #[cfg(all(feature = "desktop-renderer", target_os = "linux"))]
 use std::os::raw::c_ulong;
@@ -676,10 +676,10 @@ pub fn show_panel(id: PanelId) {
     assert_main_thread();
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id) {
-            if !panel.visible {
-                show_panel_inner(panel);
-            }
+        if let Some(panel) = panels.get_mut(id)
+            && !panel.visible
+        {
+            show_panel_inner(panel);
         }
     });
 }
@@ -689,16 +689,16 @@ pub fn hide_panel(id: PanelId) {
     assert_main_thread();
     PANELS.with(|panels| {
         let mut panels = panels.borrow_mut();
-        if let Some(panel) = panels.get_mut(id) {
-            if panel.visible {
-                hide_panel_inner(panel);
-            }
+        if let Some(panel) = panels.get_mut(id)
+            && panel.visible
+        {
+            hide_panel_inner(panel);
         }
     });
 }
 
 pub fn is_panel_visible(id: PanelId) -> bool {
-    PANELS.with(|panels| panels.borrow().get(id).map_or(false, |p| p.visible))
+    PANELS.with(|panels| panels.borrow().get(id).is_some_and(|p| p.visible))
 }
 
 thread_local! {
@@ -779,10 +779,8 @@ pub fn update_panels() {
                     "IsWindowVisible changed"
                 );
                 panel.last_hwnd_visible = hwnd_visible;
-                if hwnd_visible {
-                    if let Some(view) = &panel.view {
-                        view.mark_dirty();
-                    }
+                if hwnd_visible && let Some(view) = &panel.view {
+                    view.mark_dirty();
                 }
             }
 
@@ -1679,15 +1677,15 @@ fn panel_wndproc_inner(
         }
         WM_CHAR => {
             // Text input — send as IME commit
-            if let Some(ch) = char::from_u32(wparam as u32) {
-                if !ch.is_control() {
-                    forward_mouse_event(
-                        hwnd,
-                        blitz_traits::events::UiEvent::Ime(
-                            blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
-                        ),
-                    );
-                }
+            if let Some(ch) = char::from_u32(wparam as u32)
+                && !ch.is_control()
+            {
+                forward_mouse_event(
+                    hwnd,
+                    blitz_traits::events::UiEvent::Ime(
+                        blitz_traits::events::BlitzImeEvent::Commit(ch.to_string()),
+                    ),
+                );
             }
             0
         }

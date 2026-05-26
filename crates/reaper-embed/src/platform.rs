@@ -107,12 +107,11 @@ pub fn display_scale_factor() -> f64 {
         if !resource_manager.is_null() {
             let rm_str = std::ffi::CStr::from_ptr(resource_manager).to_string_lossy();
             for line in rm_str.lines() {
-                if let Some(dpi_str) = line.strip_prefix("Xft.dpi:") {
-                    if let Ok(dpi) = dpi_str.trim().parse::<f64>() {
-                        if dpi > 0.0 {
-                            return dpi / 96.0;
-                        }
-                    }
+                if let Some(dpi_str) = line.strip_prefix("Xft.dpi:")
+                    && let Ok(dpi) = dpi_str.trim().parse::<f64>()
+                    && dpi > 0.0
+                {
+                    return dpi / 96.0;
                 }
             }
         }

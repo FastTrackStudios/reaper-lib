@@ -402,17 +402,17 @@ impl GpuState {
         let surface_texture = match surface.get_current_texture() {
             CurrentSurfaceTexture::Success(t) | CurrentSurfaceTexture::Suboptimal(t) => t,
             CurrentSurfaceTexture::Timeout => {
-                return Err(GpuError::SurfaceTexture("timeout".into()))
+                return Err(GpuError::SurfaceTexture("timeout".into()));
             }
             CurrentSurfaceTexture::Occluded => {
-                return Err(GpuError::SurfaceTexture("occluded".into()))
+                return Err(GpuError::SurfaceTexture("occluded".into()));
             }
             CurrentSurfaceTexture::Outdated => {
-                return Err(GpuError::SurfaceTexture("outdated".into()))
+                return Err(GpuError::SurfaceTexture("outdated".into()));
             }
             CurrentSurfaceTexture::Lost => return Err(GpuError::SurfaceTexture("lost".into())),
             CurrentSurfaceTexture::Validation => {
-                return Err(GpuError::SurfaceTexture("validation".into()))
+                return Err(GpuError::SurfaceTexture("validation".into()));
             }
         };
 
@@ -580,7 +580,7 @@ fn create_offscreen_resources(
     // wgpu requires 256-byte-aligned bytes-per-row for texture→buffer copies.
     let unpadded = width * 4;
     let align = wgpu::COPY_BYTES_PER_ROW_ALIGNMENT;
-    let row_pitch = (unpadded + align - 1) / align * align;
+    let row_pitch = unpadded.div_ceil(align) * align;
 
     let target = device.create_texture(&TextureDescriptor {
         label: Some("Offscreen Present Target"),
