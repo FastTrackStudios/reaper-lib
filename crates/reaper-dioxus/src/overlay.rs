@@ -105,7 +105,7 @@ pub struct DioxusOverlay {
 }
 
 /// Configuration for overlay behavior.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct OverlayConfig {
     /// Whether the overlay accepts mouse/keyboard input (default: false = click-through).
     pub interactive: bool,
@@ -113,16 +113,6 @@ pub struct OverlayConfig {
     pub auto_fit: bool,
     /// Whether to hide the window after the initial render for later instant display.
     pub start_hidden: bool,
-}
-
-impl Default for OverlayConfig {
-    fn default() -> Self {
-        Self {
-            interactive: false,
-            auto_fit: false,
-            start_hidden: false,
-        }
-    }
 }
 
 /// Builder for creating a `DioxusOverlay` with optional context injection.
@@ -312,16 +302,16 @@ impl DioxusOverlay {
         tracing::debug!("DioxusOverlay build: layout resolved");
 
         // Auto-fit: query the root element's layout size and resize window to fit
-        if config.auto_fit {
-            if let Some((content_w, content_h)) = query_root_content_size(&doc) {
-                let fit_w = (content_w * scale_factor as f64).ceil() as u32;
-                let fit_h = (content_h * scale_factor as f64).ceil() as u32;
-                if fit_w > 0 && fit_h > 0 {
-                    window.set_frame(x, y, fit_w, fit_h);
-                    let viewport = Viewport::new(fit_w, fit_h, scale_factor, ColorScheme::Dark);
-                    doc.inner_mut().set_viewport(viewport);
-                    doc.inner_mut().resolve(0.0);
-                }
+        if config.auto_fit
+            && let Some((content_w, content_h)) = query_root_content_size(&doc)
+        {
+            let fit_w = (content_w * scale_factor as f64).ceil() as u32;
+            let fit_h = (content_h * scale_factor as f64).ceil() as u32;
+            if fit_w > 0 && fit_h > 0 {
+                window.set_frame(x, y, fit_w, fit_h);
+                let viewport = Viewport::new(fit_w, fit_h, scale_factor, ColorScheme::Dark);
+                doc.inner_mut().set_viewport(viewport);
+                doc.inner_mut().resolve(0.0);
             }
         }
 

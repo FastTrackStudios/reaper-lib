@@ -1,10 +1,10 @@
 use crate::{
-    DialogUnits, Dimensions, FontDescriptor, Menu, MenuBar, Pixels, Point, Rect, SwellStringArg,
-    ViewManager, menu_tree,
+    menu_tree, DialogUnits, Dimensions, FontDescriptor, Menu, MenuBar, Pixels, Point, Rect,
+    SwellStringArg, ViewManager,
 };
 use raw_window_handle::{HasRawWindowHandle, RawWindowHandle};
 use reaper_low::raw::RECT;
-use reaper_low::{Swell, raw};
+use reaper_low::{raw, Swell};
 use reaper_medium::{Hfont, Hwnd};
 use std::ffi::CString;
 use std::fmt::Display;

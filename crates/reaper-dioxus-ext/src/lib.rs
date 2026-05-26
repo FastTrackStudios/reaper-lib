@@ -33,9 +33,9 @@ fn plugin_main(context: PluginContext) -> Result<(), Box<dyn Error>> {
     info!("reaper-dioxus service starting…");
 
     // Initialize REAPER APIs
-    match HighReaper::load(context).setup() {
-        Ok(_) => info!("reaper-dioxus: REAPER API loaded"),
-        Err(_) => {} // Already loaded by another extension
+    // Err means it was already loaded by another extension.
+    if HighReaper::load(context).setup().is_ok() {
+        info!("reaper-dioxus: REAPER API loaded");
     }
 
     // Initialize the service registry

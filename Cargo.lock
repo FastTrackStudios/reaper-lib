@@ -78,7 +78,7 @@ dependencies = [
 [[package]]
 name = "accesskit_xplat"
 version = "0.1.1"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
  "accesskit_macos",
@@ -264,9 +264,9 @@ dependencies = [
 
 [[package]]
 name = "anyrender_vello_hybrid"
-version = "0.5.1"
+version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "61b6de3eb188f15d7782e37d086b1a06bc835043e52c2f836e64a1de0e1a2ee6"
+checksum = "c29d7d94f31a211293ec18341a2768e5bdae16b5207dcfcf6817f1359396f0b1"
 dependencies = [
  "anyrender",
  "debug_timer 0.1.3 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -719,7 +719,7 @@ dependencies = [
 [[package]]
 name = "blitz-dom"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
  "anyrender",
@@ -762,7 +762,7 @@ dependencies = [
 [[package]]
 name = "blitz-html"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -773,7 +773,7 @@ dependencies = [
 [[package]]
 name = "blitz-net"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "blitz-traits",
  "data-url",
@@ -785,7 +785,7 @@ dependencies = [
 [[package]]
 name = "blitz-paint"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "anyrender",
  "anyrender_svg",
@@ -804,7 +804,7 @@ dependencies = [
 [[package]]
 name = "blitz-shell"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "accesskit",
  "accesskit_xplat",
@@ -826,7 +826,7 @@ dependencies = [
 [[package]]
 name = "blitz-traits"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "bitflags 2.11.1",
  "bytes",
@@ -1210,20 +1210,21 @@ dependencies = [
 [[package]]
 name = "const-serialize"
 version = "0.8.0-alpha.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e42cd5aabba86f128b3763da1fec1491c0f728ce99245062cd49b6f9e6d235b"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize-macro 0.8.0-alpha.0",
+ "const-serialize-macro 0.8.0-alpha.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
 ]
 
 [[package]]
 name = "const-serialize"
 version = "0.8.0-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e42cd5aabba86f128b3763da1fec1491c0f728ce99245062cd49b6f9e6d235b"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize-macro 0.8.0-alpha.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "const-serialize-macro 0.8.0-alpha.0 (git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f)",
  "serde",
 ]
 
@@ -1241,6 +1242,8 @@ dependencies = [
 [[package]]
 name = "const-serialize-macro"
 version = "0.8.0-alpha.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42571ed01eb46d2e1adcf99c8ca576f081e46f2623d13500eba70d1d99a4c439"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1250,8 +1253,7 @@ dependencies = [
 [[package]]
 name = "const-serialize-macro"
 version = "0.8.0-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42571ed01eb46d2e1adcf99c8ca576f081e46f2623d13500eba70d1d99a4c439"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1901,6 +1903,7 @@ checksum = "be1e0bca6c3637f992fc1cc7cbc52a78c1ef6db076dbf1059c4323d6a2048376"
 [[package]]
 name = "daw"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "architect",
  "daw-control",
@@ -1915,6 +1918,7 @@ dependencies = [
 [[package]]
 name = "daw-control"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "daw-proto",
  "eyre",
@@ -1930,6 +1934,7 @@ dependencies = [
 [[package]]
 name = "daw-module"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "tokio",
  "tracing",
@@ -1938,6 +1943,7 @@ dependencies = [
 [[package]]
 name = "daw-proto"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/daw?branch=main#c9f38669f35fbcd60b953a983cd9f90c414d956c"
 dependencies = [
  "actions-proto",
  "architect",
@@ -1956,7 +1962,7 @@ checksum = "da220af51a1a335e9a930beaaef53d261e41ea9eecfb3d973a3ddae1a7284b9c"
 [[package]]
 name = "debug_timer"
 version = "0.1.3"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 
 [[package]]
 name = "deranged"
@@ -2026,6 +2032,7 @@ dependencies = [
 [[package]]
 name = "dioxus"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-asset-resolver 0.7.6",
  "dioxus-cli-config 0.7.6",
@@ -2047,6 +2054,7 @@ dependencies = [
 [[package]]
 name = "dioxus-asset-resolver"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-cli-config 0.7.6",
  "http",
@@ -2081,6 +2089,7 @@ dependencies = [
 [[package]]
 name = "dioxus-cli-config"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "wasm-bindgen",
 ]
@@ -2094,10 +2103,12 @@ checksum = "c000f584ddf608e2b272b3074bf11512a474eeeb2eb85a1915f276ce5c4a8615"
 [[package]]
 name = "dioxus-config-macros"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[package]]
 name = "dioxus-core"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "anyhow",
  "const_format",
@@ -2141,6 +2152,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "convert_case 0.8.0",
  "dioxus-rsx 0.7.6",
@@ -2165,6 +2177,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[package]]
 name = "dioxus-core-types"
@@ -2175,6 +2188,7 @@ checksum = "36963eab106b169737762f9cd5ee5fd97f585989dcb2d8e30a596e97a6999009"
 [[package]]
 name = "dioxus-desktop"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2231,6 +2245,7 @@ dependencies = [
 [[package]]
 name = "dioxus-devtools"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-cli-config 0.7.6",
  "dioxus-core 0.7.6",
@@ -2265,6 +2280,7 @@ dependencies = [
 [[package]]
 name = "dioxus-devtools-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "serde",
@@ -2285,6 +2301,7 @@ dependencies = [
 [[package]]
 name = "dioxus-document"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-core-macro 0.7.6",
@@ -2321,6 +2338,7 @@ dependencies = [
 [[package]]
 name = "dioxus-embedded"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#45c2bec5bbd196199c07d7d089685b1c3a3c0b65"
 dependencies = [
  "dioxus",
  "dioxus-desktop",
@@ -2331,6 +2349,7 @@ dependencies = [
 [[package]]
 name = "dioxus-history"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "tracing",
@@ -2349,6 +2368,7 @@ dependencies = [
 [[package]]
 name = "dioxus-hooks"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-signals 0.7.6",
@@ -2379,6 +2399,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2431,6 +2452,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html-internal-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "convert_case 0.8.0",
  "proc-macro2",
@@ -2453,6 +2475,7 @@ dependencies = [
 [[package]]
 name = "dioxus-interpreter-js"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-core-types 0.7.6",
@@ -2471,7 +2494,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "android-activity",
  "anyrender",
@@ -2509,7 +2532,7 @@ dependencies = [
 [[package]]
 name = "dioxus-native-dom"
 version = "0.7.0"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "blitz-dom",
  "blitz-traits",
@@ -2523,6 +2546,7 @@ dependencies = [
 [[package]]
 name = "dioxus-rsx"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2547,6 +2571,7 @@ dependencies = [
 [[package]]
 name = "dioxus-signals"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "futures-channel",
@@ -2577,6 +2602,7 @@ dependencies = [
 [[package]]
 name = "dioxus-stores"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-signals 0.7.6",
@@ -2599,6 +2625,7 @@ dependencies = [
 [[package]]
 name = "dioxus-stores-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "convert_case 0.8.0",
  "proc-macro2",
@@ -2621,6 +2648,7 @@ dependencies = [
 [[package]]
 name = "dioxus-web"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dioxus-cli-config 0.7.6",
  "dioxus-core 0.7.6",
@@ -3353,6 +3381,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "fts-repo"
+version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/fts-repo?branch=main#532f2ca9898b148c388e61d1013e83c2faba3ff6"
+dependencies = [
+ "eyre",
+ "owo-colors",
+]
+
+[[package]]
 name = "futf"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3585,6 +3622,7 @@ dependencies = [
 [[package]]
 name = "generational-box"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "parking_lot",
  "tracing",
@@ -4090,9 +4128,9 @@ dependencies = [
 
 [[package]]
 name = "http"
-version = "1.4.0"
+version = "1.4.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "e3ba2a386d7f85a81f119ad7498ebe444d2e22c2af0b86b069416ace48b3311a"
+checksum = "8be7462df143984c4598a256ef469b251d7d7f9e271135073e78fc535414f3d0"
 dependencies = [
  "bytes",
  "itoa",
@@ -4754,6 +4792,7 @@ dependencies = [
 [[package]]
 name = "lazy-js-bundle"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 
 [[package]]
 name = "lazy-js-bundle"
@@ -4992,9 +5031,10 @@ dependencies = [
 [[package]]
 name = "manganis"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize 0.8.0-alpha.0",
+ "const-serialize 0.8.0-alpha.0 (git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f)",
  "jni 0.21.1",
  "manganis-core 0.7.6",
  "manganis-macro 0.7.6",
@@ -5022,9 +5062,10 @@ dependencies = [
 [[package]]
 name = "manganis-core"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize 0.8.0-alpha.0",
+ "const-serialize 0.8.0-alpha.0 (git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f)",
  "dioxus-cli-config 0.7.6",
  "dioxus-core-types 0.7.6",
  "serde",
@@ -5048,6 +5089,7 @@ dependencies = [
 [[package]]
 name = "manganis-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "dunce",
  "macro-string",
@@ -6986,6 +7028,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "reaper-lib-xtask"
+version = "0.1.0"
+dependencies = [
+ "fts-repo",
+]
+
+[[package]]
 name = "reaper-low"
 version = "0.1.0"
 source = "git+https://git.starcommand.live/FastTrackStudios/reaper-rs.git?branch=feat%2Freaper-763-ruler-lanes#261645fa5b244ebc323ce261cf9460aea10bd533"
@@ -7141,9 +7190,9 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "reqwest"
-version = "0.13.3"
+version = "0.13.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "62e0021ea2c22aed41653bc7e1419abb2c97e038ff2c33d0e1309e49a97deec0"
+checksum = "219c5811de6525e5416c7d5d53bb656d3afdbc6c5af816e0802bcfa42dbdc1c3"
 dependencies = [
  "base64 0.22.1",
  "bytes",
@@ -8097,7 +8146,7 @@ checksum = "850ac3401667d004d4a13f9c93dc6d9fe67044c9bfdaf5f1519ff136ed68fbab"
 [[package]]
 name = "stylo_taffy"
 version = "0.3.0-alpha.4"
-source = "git+https://github.com/DioxusLabs/blitz.git#0e0027ab6eba536cfa03445baac48efed31609e4"
+source = "git+https://github.com/DioxusLabs/blitz.git#9ebd23a51a03514f545483b99405b31894339181"
 dependencies = [
  "stylo",
  "stylo_atoms",
@@ -8129,6 +8178,7 @@ dependencies = [
 [[package]]
 name = "subsecond"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "js-sys",
  "libc",
@@ -8165,6 +8215,7 @@ dependencies = [
 [[package]]
 name = "subsecond-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/codywright/dioxus?rev=32d9f5154fa9124b05be73b82e8b04fe717a730f#32d9f5154fa9124b05be73b82e8b04fe717a730f"
 dependencies = [
  "serde",
 ]

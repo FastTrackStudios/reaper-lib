@@ -39,7 +39,7 @@ futures-util = "0.3"
 crossbeam = "0.8"
 raw-window-handle = "0.6"
 tracing.workspace = true
-dioxus-embedded = { path = "/home/cody/Development/Dioxus/dioxus-embedded/crates/dioxus-embedded", features = ["dioxus-desktop"], optional = true }
+dioxus-embedded = { git = "https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git", branch = "main", features = ["dioxus-desktop"], optional = true }
 gtk = { version = "0.18", optional = true }
 
 [features]
@@ -55,5 +55,5 @@ x11-dl = "2.21"
 cocoa.workspace = true
 objc.workspace = true
 
-[lints.rust]
-unsafe_code = "allow"
+[lints]
+workspace = true

@@ -520,7 +520,7 @@ fn create_native_transparent_window(
         }
 
         // Set window type to notification/utility — avoids taskbar entry
-        set_x11_atoms(&xlib, display, window);
+        set_x11_atoms(xlib, display, window);
 
         (xlib.XFlush)(display);
 

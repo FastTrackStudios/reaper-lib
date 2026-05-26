@@ -4,8 +4,22 @@ members = [
     "crates/reaper-dioxus",
     "crates/reaper-dioxus-ext",
     "crates/swell-ui",
+    "xtask",
 ]
 resolver = "2"
+
+[workspace.lints.rust]
+unsafe_code = "allow"
+
+[workspace.lints.clippy]
+field_reassign_with_default = "allow"
+redundant_closure = "allow"
+nonminimal_bool = "allow"
+clone_on_copy = "allow"
+useless_vec = "allow"
+useless_conversion = "allow"
+unnecessary_fallible_conversions = "allow"
+redundant_locals = "allow"
 
 [workspace.package]
 edition = "2024"
@@ -24,7 +38,7 @@ reaper-macros = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs
 reaper-common-types = { git = "https://git.starcommand.live/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
 
 # DAW module system
-daw = { path = "../daw/crates/daw" }
+daw = { git = "https://git.starcommand.live/FastTrackStudios/daw", branch = "main", package = "daw" }
 
 # Common
 tracing = { version = "0.1", features = ["std"] }
@@ -57,25 +71,25 @@ objc = "0.2.7"
 # one Dioxus core. The desktop renderer uses our local fork to expose the
 # host-driven Wry bridge, so native's Dioxus dependencies must resolve there
 # too when `reaper-dioxus/desktop-renderer` is enabled.
-dioxus = { path = "/home/cody/Development/Dioxus/dioxus/packages/dioxus" }
-dioxus-asset-resolver = { path = "/home/cody/Development/Dioxus/dioxus/packages/asset-resolver" }
-dioxus-cli-config = { path = "/home/cody/Development/Dioxus/dioxus/packages/cli-config" }
-dioxus-config-macros = { path = "/home/cody/Development/Dioxus/dioxus/packages/config-macros" }
-dioxus-core = { path = "/home/cody/Development/Dioxus/dioxus/packages/core" }
-dioxus-core-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/core-macro" }
-dioxus-core-types = { path = "/home/cody/Development/Dioxus/dioxus/packages/core-types" }
-dioxus-devtools = { path = "/home/cody/Development/Dioxus/dioxus/packages/devtools" }
-dioxus-devtools-types = { path = "/home/cody/Development/Dioxus/dioxus/packages/devtools-types" }
-dioxus-document = { path = "/home/cody/Development/Dioxus/dioxus/packages/document" }
-dioxus-history = { path = "/home/cody/Development/Dioxus/dioxus/packages/history" }
-dioxus-hooks = { path = "/home/cody/Development/Dioxus/dioxus/packages/hooks" }
-dioxus-html = { path = "/home/cody/Development/Dioxus/dioxus/packages/html" }
-dioxus-html-internal-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/html-internal-macro" }
-dioxus-rsx = { path = "/home/cody/Development/Dioxus/dioxus/packages/rsx" }
-dioxus-signals = { path = "/home/cody/Development/Dioxus/dioxus/packages/signals" }
-dioxus-stores = { path = "/home/cody/Development/Dioxus/dioxus/packages/stores" }
-dioxus-stores-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/stores-macro" }
-generational-box = { path = "/home/cody/Development/Dioxus/dioxus/packages/generational-box" }
-manganis = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis" }
-manganis-core = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-core" }
-manganis-macro = { path = "/home/cody/Development/Dioxus/dioxus/packages/manganis/manganis-macro" }
+dioxus = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus" }
+dioxus-asset-resolver = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-asset-resolver" }
+dioxus-cli-config = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-cli-config" }
+dioxus-config-macros = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-config-macros" }
+dioxus-core = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core" }
+dioxus-core-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core-macro" }
+dioxus-core-types = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-core-types" }
+dioxus-devtools = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-devtools" }
+dioxus-devtools-types = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-devtools-types" }
+dioxus-document = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-document" }
+dioxus-history = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-history" }
+dioxus-hooks = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-hooks" }
+dioxus-html = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-html" }
+dioxus-html-internal-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-html-internal-macro" }
+dioxus-rsx = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-rsx" }
+dioxus-signals = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-signals" }
+dioxus-stores = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-stores" }
+dioxus-stores-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "dioxus-stores-macro" }
+generational-box = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "generational-box" }
+manganis = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis" }
+manganis-core = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis-core" }
+manganis-macro = { git = "https://git.starcommand.live/codywright/dioxus", rev = "32d9f5154fa9124b05be73b82e8b04fe717a730f", package = "manganis-macro" }

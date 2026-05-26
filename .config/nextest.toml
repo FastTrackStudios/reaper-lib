@@ -1,0 +1,10 @@
+[profile.default]
+fail-fast = true
+status-level = "pass"
+slow-timeout = { period = "10s", terminate-after = 3 }
+
+[profile.ci]
+fail-fast = false
+status-level = "all"
+final-status-level = "flaky"
+slow-timeout = { period = "30s", terminate-after = 3 }

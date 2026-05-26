@@ -1,4 +1,4 @@
-use reaper_low::{Swell, raw};
+use reaper_low::{raw, Swell};
 use reaper_medium::Hfont;
 use std::cell::RefCell;
 use std::collections::HashMap;
