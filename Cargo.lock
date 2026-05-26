@@ -1210,20 +1210,21 @@ dependencies = [
 [[package]]
 name = "const-serialize"
 version = "0.8.0-alpha.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9e42cd5aabba86f128b3763da1fec1491c0f728ce99245062cd49b6f9e6d235b"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize-macro 0.8.0-alpha.0",
+ "const-serialize-macro 0.8.0-alpha.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "serde",
 ]
 
 [[package]]
 name = "const-serialize"
 version = "0.8.0-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e42cd5aabba86f128b3763da1fec1491c0f728ce99245062cd49b6f9e6d235b"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize-macro 0.8.0-alpha.0 (registry+https://github.com/rust-lang/crates.io-index)",
+ "const-serialize-macro 0.8.0-alpha.0 (git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main)",
  "serde",
 ]
 
@@ -1241,6 +1242,8 @@ dependencies = [
 [[package]]
 name = "const-serialize-macro"
 version = "0.8.0-alpha.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42571ed01eb46d2e1adcf99c8ca576f081e46f2623d13500eba70d1d99a4c439"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1250,8 +1253,7 @@ dependencies = [
 [[package]]
 name = "const-serialize-macro"
 version = "0.8.0-alpha.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42571ed01eb46d2e1adcf99c8ca576f081e46f2623d13500eba70d1d99a4c439"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2030,6 +2032,7 @@ dependencies = [
 [[package]]
 name = "dioxus"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-asset-resolver 0.7.6",
  "dioxus-cli-config 0.7.6",
@@ -2051,6 +2054,7 @@ dependencies = [
 [[package]]
 name = "dioxus-asset-resolver"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-cli-config 0.7.6",
  "http",
@@ -2085,6 +2089,7 @@ dependencies = [
 [[package]]
 name = "dioxus-cli-config"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "wasm-bindgen",
 ]
@@ -2098,10 +2103,12 @@ checksum = "c000f584ddf608e2b272b3074bf11512a474eeeb2eb85a1915f276ce5c4a8615"
 [[package]]
 name = "dioxus-config-macros"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 
 [[package]]
 name = "dioxus-core"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "anyhow",
  "const_format",
@@ -2145,6 +2152,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "convert_case 0.8.0",
  "dioxus-rsx 0.7.6",
@@ -2169,6 +2177,7 @@ dependencies = [
 [[package]]
 name = "dioxus-core-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 
 [[package]]
 name = "dioxus-core-types"
@@ -2179,6 +2188,7 @@ checksum = "36963eab106b169737762f9cd5ee5fd97f585989dcb2d8e30a596e97a6999009"
 [[package]]
 name = "dioxus-desktop"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -2235,6 +2245,7 @@ dependencies = [
 [[package]]
 name = "dioxus-devtools"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-cli-config 0.7.6",
  "dioxus-core 0.7.6",
@@ -2269,6 +2280,7 @@ dependencies = [
 [[package]]
 name = "dioxus-devtools-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "serde",
@@ -2289,6 +2301,7 @@ dependencies = [
 [[package]]
 name = "dioxus-document"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-core-macro 0.7.6",
@@ -2325,6 +2338,7 @@ dependencies = [
 [[package]]
 name = "dioxus-embedded"
 version = "0.1.0"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus",
  "dioxus-desktop",
@@ -2335,6 +2349,7 @@ dependencies = [
 [[package]]
 name = "dioxus-history"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "tracing",
@@ -2353,6 +2368,7 @@ dependencies = [
 [[package]]
 name = "dioxus-hooks"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-signals 0.7.6",
@@ -2383,6 +2399,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "async-trait",
  "bytes",
@@ -2435,6 +2452,7 @@ dependencies = [
 [[package]]
 name = "dioxus-html-internal-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "convert_case 0.8.0",
  "proc-macro2",
@@ -2457,6 +2475,7 @@ dependencies = [
 [[package]]
 name = "dioxus-interpreter-js"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-core-types 0.7.6",
@@ -2527,6 +2546,7 @@ dependencies = [
 [[package]]
 name = "dioxus-rsx"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "proc-macro2",
  "proc-macro2-diagnostics",
@@ -2551,6 +2571,7 @@ dependencies = [
 [[package]]
 name = "dioxus-signals"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "futures-channel",
@@ -2581,6 +2602,7 @@ dependencies = [
 [[package]]
 name = "dioxus-stores"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-core 0.7.6",
  "dioxus-signals 0.7.6",
@@ -2603,6 +2625,7 @@ dependencies = [
 [[package]]
 name = "dioxus-stores-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "convert_case 0.8.0",
  "proc-macro2",
@@ -2625,6 +2648,7 @@ dependencies = [
 [[package]]
 name = "dioxus-web"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dioxus-cli-config 0.7.6",
  "dioxus-core 0.7.6",
@@ -3598,6 +3622,7 @@ dependencies = [
 [[package]]
 name = "generational-box"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "parking_lot",
  "tracing",
@@ -4767,6 +4792,7 @@ dependencies = [
 [[package]]
 name = "lazy-js-bundle"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 
 [[package]]
 name = "lazy-js-bundle"
@@ -5005,9 +5031,10 @@ dependencies = [
 [[package]]
 name = "manganis"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize 0.8.0-alpha.0",
+ "const-serialize 0.8.0-alpha.0 (git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main)",
  "jni 0.21.1",
  "manganis-core 0.7.6",
  "manganis-macro 0.7.6",
@@ -5035,9 +5062,10 @@ dependencies = [
 [[package]]
 name = "manganis-core"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "const-serialize 0.7.2",
- "const-serialize 0.8.0-alpha.0",
+ "const-serialize 0.8.0-alpha.0 (git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main)",
  "dioxus-cli-config 0.7.6",
  "dioxus-core-types 0.7.6",
  "serde",
@@ -5061,6 +5089,7 @@ dependencies = [
 [[package]]
 name = "manganis-macro"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "dunce",
  "macro-string",
@@ -8149,6 +8178,7 @@ dependencies = [
 [[package]]
 name = "subsecond"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "js-sys",
  "libc",
@@ -8185,6 +8215,7 @@ dependencies = [
 [[package]]
 name = "subsecond-types"
 version = "0.7.6"
+source = "git+https://git.starcommand.live/FastTrackStudios/dioxus-embedded.git?branch=main#e566b79f3ea1c52122db3994a3a8bdb4d2571f08"
 dependencies = [
  "serde",
 ]
