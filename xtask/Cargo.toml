@@ -5,4 +5,4 @@ edition = "2021"
 publish = false
 
 [dependencies]
-fts-repo = { git = "https://git.starcommand.live/FastTrackStudios/fts-repo", branch = "main" }
+fts-repo = { git = "https://codeberg.org/FastTrackStudios/fts-repo", branch = "main" }

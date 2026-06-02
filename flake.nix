@@ -3,7 +3,7 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    fts-repo.url = "git+https://git.starcommand.live/FastTrackStudios/fts-repo";
+    fts-repo.url = "git+https://codeberg.org/FastTrackStudios/fts-repo";
     fts-repo.inputs.nixpkgs.follows = "nixpkgs";
   };
   nixConfig = {
