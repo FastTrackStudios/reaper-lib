@@ -316,6 +316,7 @@ fn forward_button(
         coords: pointer_coords(x, y),
         button,
         buttons,
+        element: blitz_traits::events::Point { x, y },
         mods,
         details: Default::default(),
     };
@@ -414,6 +415,7 @@ extern "C" fn mouse_dragged(this: &Object, _sel: Sel, event: id) {
         coords: pointer_coords(x, y),
         button: blitz_traits::events::MouseEventButton::Main,
         buttons: blitz_traits::events::MouseEventButtons::Primary,
+        element: blitz_traits::events::Point { x, y },
         mods,
         details: Default::default(),
     };
