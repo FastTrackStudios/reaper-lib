@@ -78,6 +78,12 @@ impl Window {
             let luma: palette::luma::Luma = rgb.into_color();
             luma.luma < 0.5
         }
+        // Mobile targets (iOS): SWELL never runs there — swell-ui rides
+        // into app builds only transitively. Neutral default.
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            false
+        }
     }
 
     pub fn from_hwnd(hwnd: Hwnd) -> Window {
@@ -961,6 +967,12 @@ unsafe impl HasRawWindowHandle for Window {
         {
             let handle = self.get_xlib_handle().expect("couldn't get xlib handle");
             RawWindowHandle::Xlib(handle)
+        }
+        // Mobile targets (iOS): SWELL windows don't exist; nothing can
+        // legitimately ask a Window for a raw handle there.
+        #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+        {
+            unimplemented!("SWELL windows do not exist on this platform")
         }
     }
 }

@@ -110,6 +110,11 @@ fn effective_scale_factors() -> ScaleFactors {
     {
         ScaleFactors { main: 1.0, y: 1.0 }
     }
+    // Mobile targets (iOS): SWELL dialogs never open there; identity scale.
+    #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
+    {
+        ScaleFactors { main: 1.0, y: 1.0 }
+    }
 }
 
 struct ScaleFactors {
