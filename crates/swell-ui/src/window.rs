@@ -246,10 +246,8 @@ impl Window {
     #[cfg(target_os = "macos")]
     pub fn first_child_window(&self) -> Option<Window> {
         unsafe {
-            let view = &*(self.raw as *const crate::macos::NSView);
-            let view_window = view.window()?;
-            let child_content_view = view_window.child_windows().first_object()?.content_view()?;
-            Window::new(child_content_view.as_ref() as *const _ as raw::HWND)
+            let content_view = crate::macos::first_child_window_content_view(self.raw as _)?;
+            Window::new(objc2::rc::Retained::as_ptr(&content_view) as raw::HWND)
         }
     }
 
@@ -259,18 +257,10 @@ impl Window {
     #[cfg(target_os = "macos")]
     pub fn process_current_app_event_if_no_text_field(self) -> bool {
         unsafe {
-            let view = &*(self.raw as *const crate::macos::NSView);
-            if view.is_kind_of_class(objc2::class!(NSTextField))
-                || view.is_kind_of_class(objc2::class!(NSTextView))
-            {
+            if crate::macos::is_text_input(self.raw as _) {
                 return false;
             }
-            let app = crate::macos::ns_app();
-            if let Some(current_event) = app.current_event() {
-                if let Some(window) = view.window() {
-                    window.send_event(&current_event);
-                }
-            }
+            crate::macos::send_current_event_to_window(self.raw as _);
             true
         }
     }

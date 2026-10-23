@@ -21,9 +21,7 @@ winapi.workspace = true
 libloading.workspace = true
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# Use exact version for vizia compatibility
-objc2 = { workspace = true }
-objc2-foundation.workspace = true
+objc2.workspace = true
 
 # Disabled until we get egui to work nicely (search for "wonky"). It's also important to use cross v0.3.0 then
 # (once it's released) because cross v2.5 uses Ubuntu < v20, which has an old glib that's not compatible with the
