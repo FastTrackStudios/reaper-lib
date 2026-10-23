@@ -26,19 +26,19 @@ edition = "2024"
 rust-version = "1.82"
 version = "0.1.0"
 license = "MIT OR Apache-2.0"
-repository = "https://codeberg.org/FastTrackStudios/reaper-lib"
+repository = "https://github.com/FastTrackStudios/reaper-lib"
 authors = ["FastTrack Studio"]
 
 [workspace.dependencies]
 # REAPER extension dependencies (FTS fork with v7.63 ruler lane APIs)
-reaper-low = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-medium = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-common-types = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
+reaper-low = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-medium = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-common-types = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes", features = ["palette"] }
 
 # DAW module system
-daw = { git = "https://codeberg.org/FastTrackStudios/daw", branch = "main", package = "daw" }
+daw = { git = "https://github.com/FastTrackStudios/daw", branch = "main", package = "daw" }
 
 # Common
 tracing = { version = "0.1", features = ["std"] }

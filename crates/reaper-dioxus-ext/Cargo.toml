@@ -13,8 +13,8 @@ path = "src/lib.rs"
 reaper-dioxus = { path = "../reaper-dioxus" }
 reaper-low.workspace = true
 reaper-medium = { workspace = true }
-reaper-macros = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
-reaper-high = { git = "https://codeberg.org/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-macros = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
+reaper-high = { git = "https://github.com/FastTrackStudios/reaper-rs.git", branch = "feat/reaper-763-ruler-lanes" }
 tracing.workspace = true
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
